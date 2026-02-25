@@ -1,0 +1,154 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}F1 2026 Season Hub{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for the Hamburger Menu icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{% static 'f1hub/css/style.css' %}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Mobile Header (Visible only on small screens) -->
+        <header class="mobile-header">
+            <div class="sidebar-header">
+                <span class="logo-text">F1 2026</span>
+                <span class="hub-text">HUB</span>
+            </div>
+            <button class="mobile-menu-btn" id="mobile-menu-btn">
+                <i class="fas fa-bars"></i>
+            </button>
+        </header>
+
+        <!-- Sidebar Calendar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header desktop-only">
+                <span class="logo-text">F1 2026</span>
+                <span class="hub-text">HUB</span>
+            </div>
+            
+            <!-- Mobile Navigation inside Sidebar -->
+            <nav class="mobile-nav">
+                <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">DATACENTER</a>
+                <a href="{% url 'drivers' %}" class="{% if request.resolver_match.url_name == 'drivers' %}active{% endif %}">PILOTOS</a>
+                <a href="{% url 'teams' %}" class="{% if request.resolver_match.url_name == 'teams' %}active{% endif %}">EQUIPOS</a>
+                <a href="{% url 'insights' %}" class="{% if request.resolver_match.url_name == 'insights' %}active{% endif %}">ANÁLISIS</a>
+            </nav>
+
+            <div class="calendar-list">
+                <h3>CALENDARIO</h3>
+                {% for event in calendar_events %}
+                <div class="calendar-item {% if event.date < today %}completed{% elif event == next_event %}next{% else %}upcoming{% endif %}">
+                    <div class="status-icon"></div>
+                    <div class="event-details">
+                        <span class="round">R{{ event.round_number }}</span>
+                        <span class="event-name">{{ event.location }}</span>
+                        <!-- Translate date to Spanish -->
+                        <span class="event-date">{{ event.date|date:"d M" }}</span>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="calendar-item">No hay eventos.</div>
+                {% endfor %}
+            </div>
+        </aside>
+
+        <!-- Overlay for mobile sidebar -->
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-nav desktop-only-flex">
+                <nav>
+                    <a href="{% url 'dashboard' %}" class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">DATACENTER</a>
+                    <a href="{% url 'drivers' %}" class="{% if request.resolver_match.url_name == 'drivers' %}active{% endif %}">PILOTOS</a>
+                    <a href="{% url 'teams' %}" class="{% if request.resolver_match.url_name == 'teams' %}active{% endif %}">EQUIPOS</a>
+                    <a href="{% url 'insights' %}" class="{% if request.resolver_match.url_name == 'insights' %}active{% endif %}">ANÁLISIS</a>
+                </nav>
+                <div class="countdown-module">
+                    <span class="countdown-label">PRÓXIMA CARRERA</span>
+                    <span class="countdown-event">{{ next_event.name|default:"Gran Premio de Australia" }}</span>
+                    <div class="timer" id="countdown-timer" data-date="{{ next_event.date|date:'Y-m-d'|default:'2026-03-01' }}">
+                        <span>00</span>:<span>00</span>:<span>00</span>:<span>00</span>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Mobile Countdown Display -->
+            <div class="mobile-countdown glass-panel">
+                <div class="countdown-module">
+                    <div class="timer" id="mobile-countdown-timer">
+                        <span>00</span>:<span>00</span>:<span>00</span>:<span>00</span>
+                    </div>
+                    <div class="countdown-info">
+                        <span class="countdown-event">{{ next_event.name|default:"Gran Premio de Australia" }}</span>
+                    </div>
+                </div>
+            </div>
+
+            {% block content %}
+            {% endblock %}
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // Hamburger Menu Logic
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('mobile-menu-btn');
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            
+            function toggleSidebar() {
+                sidebar.classList.toggle('active');
+                overlay.classList.toggle('active');
+            }
+
+            btn.addEventListener('click', toggleSidebar);
+            overlay.addEventListener('click', toggleSidebar);
+        });
+
+        // Simple countdown logic for both timers
+        document.addEventListener("DOMContentLoaded", () => {
+            const timerEl = document.getElementById("countdown-timer");
+            const mobileTimerEl = document.getElementById("mobile-countdown-timer");
+            if (!timerEl) return;
+
+            const targetDateStr = timerEl.getAttribute("data-date");
+            if (!targetDateStr) return;
+
+            // Set target to 15:00:00 UTC on the race day
+            const targetDate = new Date(`${targetDateStr}T15:00:00Z`).getTime();
+
+            function updateTimers() {
+                const now = new Date().getTime();
+                const distance = targetDate - now;
+
+                if (distance < 0) {
+                    const finishedText = "<span>00</span>:<br><span>00</span>:<br><span>00</span>:<br><span>00</span>";
+                    timerEl.innerHTML = finishedText;
+                    if(mobileTimerEl) mobileTimerEl.innerHTML = finishedText;
+                    return;
+                }
+
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                const format = (n) => n.toString().padStart(2, "0");
+                const htmlString = `<span>${format(days)}</span>:<span>${format(hours)}</span>:<span>${format(minutes)}</span>:<span>${format(seconds)}</span>`;
+                
+                timerEl.innerHTML = htmlString;
+                if(mobileTimerEl) mobileTimerEl.innerHTML = htmlString;
+            }
+
+            setInterval(updateTimers, 1000);
+            updateTimers(); // call immediately once
+        });
+    </script>
+</body>
+</html>

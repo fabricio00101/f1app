@@ -1,0 +1,101 @@
+{% extends 'f1hub/base.html' %}
+{% load static %}
+
+{% block title %}Datacenter | F1 2026 Season Hub{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Main Hero Section -->
+    <section class="driver-focus glass-panel">
+        <div class="panel-header">
+            <h2>ENFOQUE AL PILOTO</h2>
+            <span class="accent-badge colapinto-badge">COL</span>
+        </div>
+        <div class="driver-card">
+            <div class="driver-info">
+                <h1>FRANCO<br /><span class="highlight">COLAPINTO</span></h1>
+                <p class="team-name">Williams Racing</p>
+                <div class="driver-stats">
+                    <div class="stat-box">
+                        <span class="stat-label">POSICIÓN</span>
+                        <span class="stat-value">P8</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">ÚLT. CARRERA</span>
+                        <span class="stat-value">P5</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">PUNTOS</span>
+                        <span class="stat-value">62</span>
+                    </div>
+                </div>
+            </div>
+            <div class="driver-image">
+                <div class="driver-silhouette" style="background-image: url({% static 'f1hub/img/colapinto.png' %}); background-size: cover; background-position: center top;"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Data Grid -->
+    <section class="constructors-standings glass-panel">
+        <div class="panel-header">
+            <h2>CAMPEONATO DE CONSTRUCTORES</h2>
+            <span class="accent-badge">2026</span>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>POS</th>
+                        <th>EQUIPO</th>
+                        <th>PTS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for team in constructors %}
+                    <tr>
+                        <td>{{ team.position }}</td>
+                        <td>
+                            <div class="team-name-cell">
+                                <span class="team-color-indicator" style="background-color: {{ team.color }};"></span>
+                                {{ team.name }}
+                                {% if team.new_team %}<span class="new-tag">NUEVO</span>{% endif %}
+                            </div>
+                        </td>
+                        <td>{{ team.points }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Telemetry Module -->
+    <section class="telemetry-module glass-panel">
+        <div class="panel-header">
+            <h2>AWS / ANÁLISIS DE TELEMETRÍA</h2>
+            <span class="accent-badge red">EN VIVO</span>
+        </div>
+        <div class="chart-container">
+            <div class="chart-overlay">
+                <span class="driver-legend d1">VER</span>
+                <span class="driver-legend d2">COL</span>
+            </div>
+            <div class="mock-chart">
+                <div class="glow-line blue-line"></div>
+                <div class="glow-line red-line"></div>
+            </div>
+        </div>
+        <div class="chart-metrics">
+            <div class="metric">
+                <span class="m-label">ACELERADOR (PROM)</span>
+                <span class="m-value blue">78%</span>
+            </div>
+            <div class="metric">
+                <span class="m-label">VEL. MÁXIMA</span>
+                <span class="m-value red">342 KM/H</span>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

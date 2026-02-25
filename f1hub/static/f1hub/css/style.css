@@ -1,0 +1,796 @@
+:root {
+  --bg-color: #0b0b0b;
+  --bg-lighter: #131313;
+  --bg-glass: rgba(19, 19, 19, 0.7);
+  --electric-blue: #00e1ff;
+  --racing-red: #ff2800;
+  --text-main: #ffffff;
+  --text-muted: #888888;
+  --border-color: rgba(255, 255, 255, 0.1);
+
+  --font-heading: "Orbitron", sans-serif;
+  --font-body: "Rajdhani", sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  font-family: var(--font-body);
+  overflow-x: hidden;
+  /* Carbon fiber background pattern */
+  background-image:
+    linear-gradient(
+      45deg,
+      #0b0b0b 25%,
+      transparent 25%,
+      transparent 75%,
+      #0b0b0b 75%,
+      #0b0b0b
+    ),
+    linear-gradient(
+      45deg,
+      #0b0b0b 25%,
+      transparent 25%,
+      transparent 75%,
+      #0b0b0b 75%,
+      #0b0b0b
+    );
+  background-size: 20px 20px;
+  background-position:
+    0 0,
+    10px 10px;
+}
+
+.app-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+.desktop-only { display: block; }
+.desktop-only-flex { display: flex; }
+
+.mobile-header {
+  display: none;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background-color: var(--bg-lighter);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.mobile-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-main);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.mobile-nav {
+  display: none;
+  flex-direction: column;
+  padding: 20px 30px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 12px 0;
+  transition: color 0.3s ease;
+}
+
+.mobile-nav a.active, .mobile-nav a:hover {
+  color: var(--electric-blue);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 15;
+  backdrop-filter: blur(5px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-overlay.active {
+  display: block;
+  opacity: 1;
+}
+
+.mobile-countdown {
+  display: none;
+  padding: 15px 20px;
+  margin: 20px 20px 0;
+  border-radius: 8px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-color);
+}
+
+.mobile-countdown .timer {
+  font-size: 20px;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 280px;
+  background-color: var(--bg-lighter);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.sidebar-header {
+  padding: 30px;
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+
+.logo-text {
+  color: var(--text-main);
+}
+.hub-text {
+  color: var(--racing-red);
+}
+
+.calendar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 0;
+}
+
+.calendar-list h3 {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 0 30px 20px;
+  letter-spacing: 1px;
+}
+
+.calendar-item {
+  display: flex;
+  align-items: center;
+  padding: 15px 30px;
+  border-left: 3px solid transparent;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.calendar-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.calendar-item.completed .status-icon {
+  background-color: var(--text-muted);
+  opacity: 0.5;
+}
+.calendar-item.completed .event-name {
+  color: var(--text-muted);
+}
+
+.calendar-item.next {
+  border-left-color: var(--electric-blue);
+  background: linear-gradient(
+    90deg,
+    rgba(0, 225, 255, 0.1) 0%,
+    transparent 100%
+  );
+}
+
+.calendar-item.next .status-icon {
+  background-color: var(--electric-blue);
+  box-shadow: 0 0 10px var(--electric-blue);
+}
+
+.calendar-item.next .event-name {
+  color: var(--electric-blue);
+  font-weight: 700;
+}
+
+.calendar-item.upcoming .status-icon {
+  border: 2px solid var(--text-muted);
+  background: transparent;
+}
+
+.status-icon {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 15px;
+}
+
+.event-details {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.round {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.event-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 2px 0;
+}
+
+.event-date {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.top-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 30px 40px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.top-nav nav {
+  display: flex;
+  gap: 30px;
+}
+
+.top-nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  transition: color 0.3s ease;
+}
+
+.top-nav a:hover,
+.top-nav a.active {
+  color: var(--text-main);
+}
+
+.top-nav a.active {
+  position: relative;
+}
+
+.top-nav a.active::after {
+  content: "";
+  position: absolute;
+  bottom: -10px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--electric-blue);
+  box-shadow: 0 0 8px var(--electric-blue);
+}
+
+.countdown-module {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.countdown-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.countdown-event {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--racing-red);
+}
+
+.timer {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.timer span {
+  display: inline-block;
+  min-width: 35px;
+  text-align: center;
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+  padding: 40px;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 30px;
+  flex: 1;
+}
+
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 30px;
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+
+.panel-header h2 {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+}
+
+.accent-badge {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-heading);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.accent-badge.red {
+  background-color: rgba(255, 40, 0, 0.2);
+  color: var(--racing-red);
+  border: 1px solid var(--racing-red);
+  box-shadow: 0 0 10px rgba(255, 40, 0, 0.2);
+}
+
+.colapinto-badge {
+  background-color: #005aff; /* Williams Blue */
+  color: white;
+}
+
+/* Driver Focus Hero */
+.driver-focus {
+  grid-column: 1 / 2;
+  background: linear-gradient(
+    135deg,
+    var(--bg-glass) 0%,
+    rgba(0, 90, 255, 0.05) 100%
+  );
+  display: flex;
+  flex-direction: column;
+}
+
+.driver-card {
+  display: flex;
+  flex: 1;
+}
+
+.driver-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.driver-info h1 {
+  font-family: var(--font-heading);
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -1px;
+}
+
+.driver-info .highlight {
+  color: transparent;
+  -webkit-text-stroke: 1px var(--text-main);
+}
+
+.team-name {
+  font-size: 20px;
+  color: #005aff; /* Williams base */
+  font-weight: 600;
+  margin-top: 5px;
+  margin-bottom: 40px;
+}
+
+.driver-stats {
+  display: flex;
+  gap: 40px;
+}
+
+.stat-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 5px;
+  letter-spacing: 1px;
+}
+
+.stat-value {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--electric-blue);
+  text-shadow: 0 0 15px rgba(0, 225, 255, 0.3);
+}
+
+.driver-image {
+  flex: 1;
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.driver-silhouette {
+  width: 300px;
+  height: 300px;
+  background: linear-gradient(
+    to top,
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 100%
+  );
+  border-radius: 50% 50% 0 0;
+  position: relative;
+}
+
+.driver-silhouette::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 10%;
+  right: 10%;
+  top: 20%;
+  background-color: rgba(255, 255, 255, 0.05);
+  clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%);
+}
+
+/* Data Grid */
+.constructors-standings {
+  grid-column: 2 / 3;
+  grid-row: 1 / 3;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 15px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+th {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+td {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+tr:hover td {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.team-name-cell {
+  display: flex;
+  align-items: center;
+}
+
+.team-color-indicator {
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  margin-right: 12px;
+}
+
+.new-tag {
+  font-size: 9px;
+  background-color: var(--racing-red);
+  color: white;
+  padding: 2px 5px;
+  border-radius: 3px;
+  margin-left: 10px;
+  font-weight: 700;
+}
+
+/* Telemetry Module */
+.telemetry-module {
+  grid-column: 1 / 2;
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-container {
+  flex: 1;
+  position: relative;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.chart-overlay {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  display: flex;
+  gap: 15px;
+  z-index: 2;
+}
+
+.driver-legend {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+}
+
+.driver-legend::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.driver-legend.d1::before {
+  background-color: var(--electric-blue);
+  box-shadow: 0 0 8px var(--electric-blue);
+}
+.driver-legend.d2::before {
+  background-color: var(--racing-red);
+  box-shadow: 0 0 8px var(--racing-red);
+}
+
+.mock-chart {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Creating CSS mock lines for telemetry using clip-path and shadows */
+.glow-line {
+  position: absolute;
+  bottom: 20%;
+  height: 60%;
+  width: 100%;
+}
+
+.blue-line {
+  border-top: 3px solid var(--electric-blue);
+  filter: drop-shadow(0 0 8px var(--electric-blue));
+  clip-path: polygon(
+    0 80%,
+    10% 20%,
+    30% 20%,
+    40% 90%,
+    60% 10%,
+    80% 10%,
+    100% 70%,
+    100% 100%,
+    0 100%
+  );
+  background: linear-gradient(to bottom, rgba(0, 225, 255, 0.2), transparent);
+}
+
+.red-line {
+  border-top: 3px solid var(--racing-red);
+  filter: drop-shadow(0 0 8px var(--racing-red));
+  clip-path: polygon(
+    0 75%,
+    15% 25%,
+    25% 25%,
+    45% 85%,
+    55% 15%,
+    85% 15%,
+    100% 65%,
+    100% 100%,
+    0 100%
+  );
+  background: linear-gradient(to bottom, rgba(255, 40, 0, 0.2), transparent);
+}
+
+.chart-metrics {
+  display: flex;
+  justify-content: space-around;
+  padding-top: 15px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metric {
+  text-align: center;
+}
+
+.m-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.m-value {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.m-value.blue {
+  color: var(--electric-blue);
+  text-shadow: 0 0 10px rgba(0, 225, 255, 0.3);
+}
+.m-value.red {
+  color: var(--racing-red);
+  text-shadow: 0 0 10px rgba(255, 40, 0, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .constructors-standings {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-container {
+    flex-direction: column;
+  }
+
+  .desktop-only, .desktop-only-flex {
+    display: none !important;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .mobile-nav {
+    display: flex;
+  }
+
+  .mobile-countdown {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -300px; /* Hide by default */
+    width: 280px;
+    height: 100vh;
+    z-index: 30;
+    transition: left 0.3s ease;
+    box-shadow: 5px 0 15px rgba(0,0,0,0.5);
+  }
+
+  .sidebar.active {
+    left: 0;
+  }
+
+  .calendar-list {
+    padding-bottom: 80px;
+  }
+
+  .top-nav {
+    display: none;
+  }
+
+  .dashboard-grid {
+    padding: 20px;
+  }
+
+  .driver-card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .driver-info {
+    align-items: center;
+  }
+
+  .driver-info h1 {
+    font-size: 40px;
+  }
+
+  .driver-stats {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+  }
+
+  .driver-image {
+    margin-top: 30px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .driver-silhouette {
+    width: 250px;
+    height: 250px;
+  }
+
+  .chart-overlay {
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  table th, table td {
+    padding: 10px 5px;
+    font-size: 14px;
+  }
+}

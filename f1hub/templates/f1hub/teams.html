@@ -1,0 +1,23 @@
+{% extends 'f1hub/base.html' %}
+
+{% block title %}Equipos | F1 2026 Season Hub{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <section class="glass-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
+            <h2>EQUIPOS DE LA TEMPORADA 2026</h2>
+        </div>
+        <div class="table-container" style="display: flex; flex-wrap: wrap; gap: 20px;">
+            {% for team in teams_list %}
+            <div class="driver-card" style="flex: 1; min-width: 250px; background: rgba(255,255,255,0.02); padding: 20px; border-radius: 8px;">
+                <h3 style="font-family: var(--font-heading); font-size: 24px; color: var(--electric-blue);">{{ team.team }}</h3>
+                <p style="color: var(--text-muted); margin-top: 10px;">En desarrollo para 2026.</p>
+            </div>
+            {% empty %}
+            <p>No hay información de equipos.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

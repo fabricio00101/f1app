@@ -1,0 +1,39 @@
+{% extends 'f1hub/base.html' %}
+
+{% block title %}Pilotos | F1 2026 Season Hub{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <section class="glass-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
+            <h2>PILOTOS DE LA TEMPORADA 2026</h2>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>PILOTO</th>
+                        <th>ACRÓNIMO</th>
+                        <th>EQUIPO</th>
+                        <th>NACIONALIDAD</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for driver in drivers_list %}
+                    <tr>
+                        <td style="font-size: 20px;">{{ driver.name }}</td>
+                        <td><span class="accent-badge">{{ driver.acronym }}</span></td>
+                        <td style="color: var(--text-muted);">{{ driver.team }}</td>
+                        <td>{{ driver.nationality }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4">No hay información de pilotos disponible por el momento.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
