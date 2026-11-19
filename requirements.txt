@@ -1,0 +1,4 @@
+Django>=5.0
+fastf1
+matplotlib
+pandas
