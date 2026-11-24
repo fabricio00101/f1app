@@ -1,5 +1,9 @@
 import os
+import sys
 import django
+
+# Make the project root importable when running from scripts/
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Setup django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')

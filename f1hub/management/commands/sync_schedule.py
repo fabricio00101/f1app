@@ -6,7 +6,7 @@ from f1hub.models import Season, Event, Session
 import pandas as pd
 
 class Command(BaseCommand):
-    help = 'Download and sync the 2026 F1 schedule using FastF1'
+    help = 'Download and sync the configured F1 season schedule using FastF1'
 
     def handle(self, *args, **options):
         # Configure FastF1 cache
@@ -14,7 +14,7 @@ class Command(BaseCommand):
         os.makedirs(cache_dir, exist_ok=True)
         fastf1.Cache.enable_cache(cache_dir)
 
-        year = 2026
+        year = getattr(settings, "F1_SEASON_YEAR", 2026)
         
         self.stdout.write(self.style.SUCCESS(f'Fetching schedule for the {year} season...'))
         
@@ -66,11 +66,11 @@ class Command(BaseCommand):
     def sync_sessions_for_event(self, event, row):
         # Maps FastF1 column names to our Session Type choices
         session_mapping = [
-            ('Session1', 'Session1DateUTC'),
-            ('Session2', 'Session2DateUTC'),
-            ('Session3', 'Session3DateUTC'),
-            ('Session4', 'Session4DateUTC'),
-            ('Session5', 'Session5DateUTC'),
+            ('Session1', 'Session1DateUtc'),
+            ('Session2', 'Session2DateUtc'),
+            ('Session3', 'Session3DateUtc'),
+            ('Session4', 'Session4DateUtc'),
+            ('Session5', 'Session5DateUtc'),
         ]
         
         name_translator = {
@@ -92,6 +92,9 @@ class Command(BaseCommand):
                     
                     # Convert pandas NaT to None or extract dt
                     session_dt = row[date_col]
+                    # DateUtc columns are naive UTC; localize so Django (USE_TZ=True) stores the correct instant
+                    if getattr(session_dt, 'tzinfo', None) is None:
+                        session_dt = session_dt.tz_localize('UTC')
                     
                     Session.objects.get_or_create(
                         event=event,

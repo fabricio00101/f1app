@@ -1,0 +1,169 @@
+{% extends 'f1hub/base.html' %}
+
+{% block title %}Telemetría | F1 {{ season_year }} Season Hub{% endblock %}
+
+{% block content %}
+<section class="telemetry-module glass-panel" id="telemetry-panel">
+    <div class="panel-header">
+        <h2>COMPARACIÓN DE TELEMETRÍA</h2>
+        <span class="accent-badge">DATOS REALES</span>
+    </div>
+
+    <form method="get" action="{% url 'telemetry' %}" id="telemetry-form">
+        <div class="driver-stats">
+            <label class="stat-box">
+                <span class="stat-label">PILOTO 1</span>
+                <select name="d1" aria-label="Primer piloto">
+                    {% for driver in drivers_list %}
+                    <option value="{{ driver.acronym }}" {% if driver == d1 %}selected{% endif %}>{{ driver.name }} ({{ driver.acronym }})</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="stat-box">
+                <span class="stat-label">PILOTO 2</span>
+                <select name="d2" aria-label="Segundo piloto">
+                    {% for driver in drivers_list %}
+                    <option value="{{ driver.acronym }}" {% if driver == d2 %}selected{% endif %}>{{ driver.name }} ({{ driver.acronym }})</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="stat-box">
+                <span class="stat-label">SESIÓN</span>
+                <select name="session" aria-label="Sesión">
+                    {% for session in sessions_list %}
+                    <option value="{{ session.pk }}" {% if session == selected_session %}selected{% endif %}>{{ session }} · {{ session.date_time|date:"d/m/Y H:i" }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <p><button type="submit" id="telemetry-submit">Comparar</button></p>
+    </form>
+
+    <p><span class="stat-label">Criterio del selector: {{ sessions_criterion }}</span></p>
+
+    <div id="telemetry-loading" data-state="generando" data-job-key="{{ job_key }}"
+         data-status-url="{% url 'telemetry_job_status' %}" {% if not job_key %}hidden{% endif %}>
+        <span class="stat-label">Generando telemetría… la primera comparación puede demorar unos segundos. Esta página se actualizará sola cuando termine.</span>
+    </div>
+    <div id="telemetry-async-result" hidden></div>
+
+    {% if error %}
+    <div class="telemetry-error" data-state="error" role="alert">
+        <span class="stat-label">Error: {{ error }}</span>
+    </div>
+    {% elif plot_url %}
+    <figure class="telemetry-result" data-state="success">
+        <div class="chart-container">
+            <img src="{{ plot_url }}" alt="Comparación de velocidad entre {{ d1.name }} y {{ d2.name }}" style="max-width: 100%; height: auto;">
+        </div>
+        <figcaption>
+            <span class="stat-label">Fuente: {{ source_label }} · FastF1 · vuelta más rápida de cada piloto.</span>
+        </figcaption>
+    </figure>
+    {% elif not job_key %}
+    <div class="chart-container" data-state="empty" style="display: flex; align-items: center; justify-content: center;">
+        <span class="stat-label">Sin telemetría disponible. Elegí dos pilotos y una sesión para comparar.</span>
+    </div>
+    {% endif %}
+
+    <p><span class="stat-label">Datos de calendario y pilotos: FastF1 · temporada {{ season_year }}.</span></p>
+</section>
+
+<script>
+    // El request devuelve enseguida: si no hay caché, el servidor lanza un hilo
+    // y acá sondeamos su estado hasta que termine o falle.
+    (function () {
+        const form = document.getElementById("telemetry-form");
+        const loading = document.getElementById("telemetry-loading");
+        const submit = document.getElementById("telemetry-submit");
+        const result = document.getElementById("telemetry-async-result");
+
+        if (form && submit) {
+            form.addEventListener("submit", function () {
+                if (loading) loading.hidden = false;
+                submit.disabled = true;
+                submit.textContent = "Generando…";
+            });
+        }
+
+        const key = loading ? loading.getAttribute("data-job-key") : "";
+        const endpoint = loading ? loading.getAttribute("data-status-url") : "";
+        if (!key || !endpoint || !result) return;
+
+        let finished = false;
+
+        function stopLoading() {
+            finished = true;
+            if (loading) loading.hidden = true;
+            if (submit) {
+                submit.disabled = false;
+                submit.textContent = "Comparar";
+            }
+        }
+
+        function showError(message) {
+            const box = document.createElement("div");
+            box.className = "telemetry-error";
+            box.setAttribute("data-state", "error");
+            box.setAttribute("role", "alert");
+            const text = document.createElement("span");
+            text.className = "stat-label";
+            text.textContent = "Error: " + message;
+            box.appendChild(text);
+            result.replaceChildren(box);
+            result.hidden = false;
+        }
+
+        function showPlot(url) {
+            const figure = document.createElement("figure");
+            figure.className = "telemetry-result";
+            figure.setAttribute("data-state", "success");
+            const chart = document.createElement("div");
+            chart.className = "chart-container";
+            const image = document.createElement("img");
+            image.src = url;
+            image.alt = "Comparación de velocidad entre {{ d1.name|escapejs }} y {{ d2.name|escapejs }}";
+            image.style.maxWidth = "100%";
+            image.style.height = "auto";
+            chart.appendChild(image);
+            figure.appendChild(chart);
+            const caption = document.createElement("figcaption");
+            const text = document.createElement("span");
+            text.className = "stat-label";
+            text.textContent = "Fuente: {{ source_label|escapejs }} · FastF1 · vuelta más rápida de cada piloto.";
+            caption.appendChild(text);
+            figure.appendChild(caption);
+            result.replaceChildren(figure);
+            result.hidden = false;
+        }
+
+        function poll() {
+            if (finished) return;
+            fetch(endpoint + "?key=" + encodeURIComponent(key), {
+                headers: { "Accept": "application/json" }
+            })
+                .then(function (response) {
+                    if (!response.ok) throw new Error("status");
+                    return response.json();
+                })
+                .then(function (data) {
+                    if (data.status === "ready" && data.plot_url) {
+                        showPlot(data.plot_url);
+                        stopLoading();
+                    } else if (data.status === "error" || data.status === "unknown") {
+                        showError(data.error || "No se pudo generar la telemetría.");
+                        stopLoading();
+                    } else {
+                        window.setTimeout(poll, 1200);
+                    }
+                })
+                .catch(function () {
+                    showError("No se pudo consultar el estado de la telemetría. Recargá la página para intentarlo.");
+                    stopLoading();
+                });
+        }
+
+        poll();
+    })();
+</script>
+{% endblock %}

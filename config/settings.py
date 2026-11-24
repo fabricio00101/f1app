@@ -62,6 +62,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'f1hub.context_processors.race_context',
             ],
         },
     },
@@ -121,3 +122,13 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # Media files
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+
+# Temporada mostrada por el hub. Los comandos de sincronización y el contexto
+# compartido usan este valor (con default en el código para no romper nada).
+F1_SEASON_YEAR = 2026
+
+# Configuración de la telemetría: validez de la caché y tamaño del selector de
+# sesiones en la vista. El código aplica defaults vía getattr().
+TELEMETRY_CACHE_TTL_DAYS = 7
+TELEMETRY_SESSION_LIMIT = 50

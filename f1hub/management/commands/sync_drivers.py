@@ -1,25 +1,27 @@
 import os
 import fastf1
+import pandas as pd
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from f1hub.models import Driver
+from f1hub.models import Driver, Season
 
 
 class Command(BaseCommand):
     help = "Download and sync F1 drivers using FastF1"
 
     def add_arguments(self, parser):
+        default_year = getattr(settings, "F1_SEASON_YEAR", 2026)
         parser.add_argument(
             "--year",
             type=int,
-            default=2025,
-            help="Year to fetch drivers from (def: 2025 until 2026 starts)",
+            default=default_year,
+            help=f"Year to fetch drivers from (def: {default_year})",
         )
         parser.add_argument(
             "--round",
             type=str,
             default="last",
-            help="Round number or name to fetch from (def: last round of the year)",
+            help="Round number or name to fetch from (def: last round already held)",
         )
 
     def handle(self, *args, **options):
@@ -36,6 +38,9 @@ class Command(BaseCommand):
             # FastF1 schedule can give us the last round
             schedule = fastf1.get_event_schedule(year)
             schedule = schedule[schedule["EventFormat"] != "testing"]
+            # Only rounds already held: EventDate is naive (verified for fastf1
+            # 3.5.3), so compare against a naive "now" to avoid tz TypeErrors.
+            schedule = schedule[schedule["EventDate"] <= pd.Timestamp.now()]
             if schedule.empty:
                 self.stdout.write(self.style.ERROR(f"No events found for {year}"))
                 return
@@ -46,6 +51,10 @@ class Command(BaseCommand):
         )
 
         try:
+            season, _ = Season.objects.get_or_create(
+                year=year,
+                defaults={"regulations": "New era of engines and active aerodynamics"},
+            )
             session = fastf1.get_session(year, round_val, "R")
             # Load only what we need to avoid long downloads
             session.load(telemetry=False, laps=False, weather=False)
@@ -78,6 +87,8 @@ class Command(BaseCommand):
                 "DOO": "AUS",
                 "HAD": "FRA",
                 "BOR": "BRA",
+                "CAM": "BRA",
+                "LIN": "GBR",
             }
 
             drivers_synced = 0
@@ -95,7 +106,12 @@ class Command(BaseCommand):
 
                 driver, created = Driver.objects.update_or_create(
                     acronym=acronym,
-                    defaults={"name": name, "team": team, "nationality": nationality},
+                    defaults={
+                        "name": name,
+                        "team": team,
+                        "nationality": nationality,
+                        "season": season,
+                    },
                 )
                 if created:
                     self.stdout.write(f"Created driver: {name} ({acronym})")

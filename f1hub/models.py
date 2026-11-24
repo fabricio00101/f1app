@@ -52,6 +52,15 @@ class Driver(models.Model):
     acronym = models.CharField(max_length=3, unique=True)
     team = models.CharField(max_length=100)
     nationality = models.CharField(max_length=50)
+    # Puede ser nulo en datos antiguos: la vista solo rechaza pilotos cuyo
+    # año asignado difiere del de la sesión seleccionada.
+    season = models.ForeignKey(
+        Season,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="drivers",
+    )
 
     def __str__(self):
         return f"{self.name} ({self.acronym})"
@@ -62,6 +71,11 @@ class TelemetryCache(models.Model):
     driver2 = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name='telemetry_driver2')
     file_path = models.CharField(max_length=500, help_text="Local path to the generated plot or data file")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # El servicio normaliza la pareja por acronym; la BD garantiza que no
+        # existan dos filas para la misma sesión y pareja canónica.
+        unique_together = ("session", "driver1", "driver2")
 
     def __str__(self):
         return f"Telemetry: {self.driver1.acronym} vs {self.driver2.acronym} - {self.session}"

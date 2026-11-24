@@ -1,7 +1,7 @@
 {% extends 'f1hub/base.html' %}
 {% load static %}
 
-{% block title %}Datacenter | F1 2026 Season Hub{% endblock %}
+{% block title %}Datacenter | F1 {{ season_year }} Season Hub{% endblock %}
 
 {% block content %}
 <div class="dashboard-grid">
@@ -9,93 +9,82 @@
     <section class="driver-focus glass-panel">
         <div class="panel-header">
             <h2>ENFOQUE AL PILOTO</h2>
-            <span class="accent-badge colapinto-badge">COL</span>
+            <span class="accent-badge">{% if colapinto %}{{ colapinto.acronym }}{% else %}—{% endif %}</span>
         </div>
         <div class="driver-card">
             <div class="driver-info">
-                <h1>FRANCO<br /><span class="highlight">COLAPINTO</span></h1>
-                <p class="team-name">Williams Racing</p>
+                {% if colapinto %}
+                <h1>{{ colapinto.name|upper }}</h1>
+                <p class="team-name">{{ colapinto.team }}</p>
                 <div class="driver-stats">
                     <div class="stat-box">
-                        <span class="stat-label">POSICIÓN</span>
-                        <span class="stat-value">P8</span>
+                        <span class="stat-label">ACRÓNIMO</span>
+                        <span class="stat-value">{{ colapinto.acronym }}</span>
                     </div>
                     <div class="stat-box">
-                        <span class="stat-label">ÚLT. CARRERA</span>
-                        <span class="stat-value">P5</span>
+                        <span class="stat-label">NACIONALIDAD</span>
+                        <span class="stat-value">{{ colapinto.nationality|default:"—" }}</span>
                     </div>
                     <div class="stat-box">
-                        <span class="stat-label">PUNTOS</span>
-                        <span class="stat-value">62</span>
+                        <span class="stat-label">POSICIÓN OFICIAL</span>
+                        <span class="stat-value">—</span>
                     </div>
                 </div>
+                <p><span class="stat-label">Posición y puntos: sin datos oficiales cargados.</span></p>
+                {% else %}
+                <h1>SIN DATOS</h1>
+                <p class="team-name">Piloto no disponible</p>
+                <p><span class="stat-label">No hay información de pilotos disponible por el momento.</span></p>
+                {% endif %}
             </div>
+            {% if colapinto %}
             <div class="driver-image">
                 <div class="driver-silhouette" style="background-image: url({% static 'f1hub/img/colapinto.png' %}); background-size: cover; background-position: center top;"></div>
             </div>
+            {% endif %}
         </div>
     </section>
 
-    <!-- Data Grid -->
+    <!-- Teams / constructors (sin standings oficiales) -->
     <section class="constructors-standings glass-panel">
         <div class="panel-header">
-            <h2>CAMPEONATO DE CONSTRUCTORES</h2>
-            <span class="accent-badge">2026</span>
+            <h2>CONSTRUCTORES {{ season_year }}</h2>
+            <span class="accent-badge">SIN CLASIFICACIÓN</span>
         </div>
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
-                        <th>POS</th>
                         <th>EQUIPO</th>
-                        <th>PTS</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for team in constructors %}
                     <tr>
-                        <td>{{ team.position }}</td>
-                        <td>
-                            <div class="team-name-cell">
-                                <span class="team-color-indicator" style="background-color: {{ team.color }};"></span>
-                                {{ team.name }}
-                                {% if team.new_team %}<span class="new-tag">NUEVO</span>{% endif %}
-                            </div>
-                        </td>
-                        <td>{{ team.points }}</td>
+                        <td>{{ team.name }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td>No hay equipos disponibles.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        <p><span class="stat-label">Sin clasificación oficial cargada: se listan equipos, sin puntos ni posiciones.</span></p>
     </section>
 
-    <!-- Telemetry Module -->
+    <!-- Telemetry Module: acceso a la comparación con datos reales de sesión -->
     <section class="telemetry-module glass-panel">
         <div class="panel-header">
-            <h2>AWS / ANÁLISIS DE TELEMETRÍA</h2>
-            <span class="accent-badge red">EN VIVO</span>
+            <h2>ANÁLISIS DE TELEMETRÍA</h2>
+            <span class="accent-badge">DATOS REALES</span>
         </div>
-        <div class="chart-container">
-            <div class="chart-overlay">
-                <span class="driver-legend d1">VER</span>
-                <span class="driver-legend d2">COL</span>
-            </div>
-            <div class="mock-chart">
-                <div class="glow-line blue-line"></div>
-                <div class="glow-line red-line"></div>
-            </div>
+        <div class="chart-container" style="display: flex; align-items: center; justify-content: center;">
+            <span class="stat-label">Sin telemetría disponible.</span>
         </div>
-        <div class="chart-metrics">
-            <div class="metric">
-                <span class="m-label">ACELERADOR (PROM)</span>
-                <span class="m-value blue">78%</span>
-            </div>
-            <div class="metric">
-                <span class="m-label">VEL. MÁXIMA</span>
-                <span class="m-value red">342 KM/H</span>
-            </div>
-        </div>
+        <p><span class="stat-label">Compará la vuelta más rápida de dos pilotos en una sesión real: <a href="{% url 'telemetry' %}">VER TELEMETRÍA →</a></span></p>
     </section>
 </div>
+<p><span class="stat-label">Datos de calendario y pilotos: FastF1 · temporada {{ season_year }}. Sin clasificación oficial cargada.</span></p>
 {% endblock %}

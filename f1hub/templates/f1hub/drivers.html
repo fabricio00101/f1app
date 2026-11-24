@@ -1,12 +1,12 @@
 {% extends 'f1hub/base.html' %}
 
-{% block title %}Pilotos | F1 2026 Season Hub{% endblock %}
+{% block title %}Pilotos | F1 {{ season_year }} Season Hub{% endblock %}
 
 {% block content %}
 <div class="dashboard-grid">
     <section class="glass-panel" style="grid-column: 1 / -1;">
         <div class="panel-header">
-            <h2>PILOTOS DE LA TEMPORADA 2026</h2>
+            <h2>PILOTOS DE LA TEMPORADA {{ season_year }}</h2>
         </div>
         <div class="table-container">
             <table>

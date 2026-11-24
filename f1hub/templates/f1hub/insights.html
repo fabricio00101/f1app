@@ -1,6 +1,6 @@
 {% extends 'f1hub/base.html' %}
 
-{% block title %}Análisis | F1 2026 Season Hub{% endblock %}
+{% block title %}Análisis | F1 {{ season_year }} Season Hub{% endblock %}
 
 {% block content %}
 <div class="dashboard-grid">
@@ -8,7 +8,7 @@
         <i class="fas fa-chart-line" style="font-size: 48px; color: var(--electric-blue); margin-bottom: 20px;"></i>
         <h1 style="font-family: var(--font-heading); font-size: 32px;">ANÁLISIS AVANZADO</h1>
         <p style="color: var(--text-muted); max-width: 600px; margin-top: 20px;">
-            El módulo de telemetría y AWS Insights para la temporada 2026 estará completamente operativo una vez que comiencen las sesiones oficiales de práctica. El sistema recolectará datos en vivo de FastF1 para generar comparaciones de velocidad, uso de acelerador y frenado.
+            El módulo de telemetría y AWS Insights para la temporada {{ season_year }} estará completamente operativo una vez que comiencen las sesiones oficiales de práctica. El sistema recolectará datos en vivo de FastF1 para generar comparaciones de velocidad, uso de acelerador y frenado.
         </p>
     </section>
 </div>

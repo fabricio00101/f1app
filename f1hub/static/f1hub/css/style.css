@@ -388,11 +388,6 @@ body {
   box-shadow: 0 0 10px rgba(255, 40, 0, 0.2);
 }
 
-.colapinto-badge {
-  background-color: #005aff; /* Williams Blue */
-  color: white;
-}
-
 /* Driver Focus Hero */
 .driver-focus {
   grid-column: 1 / 2;
@@ -608,23 +603,7 @@ tr:hover td {
   box-shadow: 0 0 8px var(--racing-red);
 }
 
-.mock-chart {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
 /* Creating CSS mock lines for telemetry using clip-path and shadows */
-.glow-line {
-  position: absolute;
-  bottom: 20%;
-  height: 60%;
-  width: 100%;
-}
-
 .blue-line {
   border-top: 3px solid var(--electric-blue);
   filter: drop-shadow(0 0 8px var(--electric-blue));

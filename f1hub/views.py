@@ -1,57 +1,39 @@
+import logging
+import os
+from urllib.parse import urljoin
+
+from django.conf import settings
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
-from .models import Event, Driver
-import datetime
+
+from .context_processors import season_year
+from .jobs import TELEMETRY_USER_ERROR, get_job, start_job
+from .models import Driver, Session
+from .services import get_cached_telemetry_plot
+
+logger = logging.getLogger(__name__)
 
 
 def dashboard(request):
-    today = timezone.localdate()
-
-    # Try finding next event
-    next_event = Event.objects.filter(date__gte=today).order_by("date").first()
-    # Default to first race if none (since season hasn't started or we are running tests)
-    if not next_event:
-        next_event = Event.objects.filter(season__year=2026).first()
-
     # Find Colapinto data
     colapinto = Driver.objects.filter(acronym="COL").first()
 
-    # Calendar
-    calendar_events = Event.objects.filter(season__year=2026).order_by("date")
-
-    # Mocking Constructors Championship for 2026 since we don't track points yet
+    # No hay puntos ni posiciones oficiales en la BD: solo listamos los
+    # equipos reales derivados de los pilotos, sin simular una clasificación.
     constructors = [
-        {"position": 1, "name": "Ferrari", "points": 214, "color": "#ff2800"},
-        {"position": 2, "name": "McLaren", "points": 185, "color": "#ff8000"},
-        {"position": 3, "name": "Red Bull Racing", "points": 142, "color": "#001a4d"},
-        {
-            "position": 4,
-            "name": "Cadillac F1",
-            "points": 89,
-            "color": "#f2f2f2",
-            "new_team": True,
-        },
-        {
-            "position": 5,
-            "name": "Audi Sport",
-            "points": 76,
-            "color": "#cc0000",
-            "new_team": True,
-        },
-        {"position": 6, "name": "Mercedes", "points": 65, "color": "#00d2be"},
-        {"position": 7, "name": "Aston Martin", "points": 45, "color": "#00665e"},
-        {"position": 8, "name": "Alpine", "points": 28, "color": "#0090ff"},
-        {"position": 9, "name": "Racing Bulls", "points": 12, "color": "#0029b9"},
-        {"position": 10, "name": "Williams", "points": 8, "color": "#005aff"},
-        {"position": 11, "name": "Haas", "points": 0, "color": "#ffffff"},
+        {"name": row["team"]}
+        for row in Driver.objects.exclude(team="")
+        .values("team")
+        .distinct()
+        .order_by("team")
     ]
 
+    # next_event, calendar_events y today los aporta race_context (context
+    # processor), para que el layout use los mismos datos en todas las vistas.
     context = {
-        "next_event": next_event,
         "colapinto": colapinto,
-        "calendar_events": calendar_events,
         "constructors": constructors,
-        "today": today,
     }
 
     return render(request, "f1hub/dashboard.html", context)
@@ -70,3 +52,170 @@ def teams(request):
 
 def insights(request):
     return render(request, "f1hub/insights.html")
+
+
+def _source_label(session):
+    """Etiqueta legible de la fuente del gráfico: evento, sesión y fecha local."""
+    when = timezone.localtime(session.date_time).strftime("%d/%m/%Y")
+    return f"{session.event.name} – {session.name} – {when}"
+
+
+def _media_url(plot_path):
+    """Convierte la ruta devuelta por el servicio en una URL bajo MEDIA_URL."""
+    if not plot_path:
+        return ""
+
+    plot_path = str(plot_path)
+    if os.path.isabs(plot_path):
+        plot_path = os.path.relpath(plot_path, str(settings.MEDIA_ROOT))
+    plot_path = plot_path.replace("\\", "/").lstrip("/")
+
+    base = str(settings.MEDIA_URL)
+    # MEDIA_URL del proyecto es relativa ("media/"); sin la barra inicial el
+    # navegador la resolvería contra la URL de esta vista.
+    if not base.startswith(("http://", "https://", "/")):
+        base = "/" + base
+    if not base.endswith("/"):
+        base += "/"
+
+    # El servicio puede devolver ya la URL con el prefijo de media incluido.
+    prefix = base.rstrip("/").rsplit("/", 1)[-1] + "/"
+    if plot_path.startswith(prefix):
+        plot_path = plot_path[len(prefix):]
+
+    return urljoin(base, plot_path)
+
+
+def _session_limit():
+    """Cantidad máxima de sesiones del selector (configurable, default 50)."""
+    try:
+        limit = int(getattr(settings, "TELEMETRY_SESSION_LIMIT", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    return limit if limit > 0 else 50
+
+
+def _driver_season_error(d1, d2, session):
+    """Rechaza pilotos asignados explícitamente a otra temporada.
+
+    Los pilotos sin temporada asignada (filas antiguas) se permiten para no
+    dejar fuera a datos legacy; ``sync_drivers`` siempre guarda el año.
+    """
+    season = session.event.season
+    for driver in (d1, d2):
+        if driver.season_id and driver.season_id != season.pk:
+            return (
+                f"El piloto {driver.name} ({driver.acronym}) no pertenece a la "
+                f"temporada {season.year} de la sesión seleccionada."
+            )
+    return ""
+
+
+def telemetry(request):
+    """Compara la telemetría real de dos pilotos en una sesión de la BD.
+
+    Si ya hay un PNG válido en caché se sirve en el mismo request; si no, se
+    lanza un trabajo en segundo plano y la plantilla sondea su estado. Así el
+    primer cálculo de FastF1 nunca bloquea la respuesta.
+    """
+    drivers_list = list(Driver.objects.all().order_by("name"))
+    limit = _session_limit()
+    sessions_list = list(
+        Session.objects.select_related("event")
+        .filter(event__season__year=season_year())
+        .order_by("-date_time")[:limit]
+    )
+    sessions_criterion = (
+        f"Últimas {len(sessions_list)} sesiones de la temporada "
+        f"{season_year()} (más recientes primero)."
+    )
+    # Por defecto, la última sesión de carrera; si no hay carreras, la última
+    # sesión disponible de cualquier tipo.
+    default_session = next(
+        (session for session in sessions_list if session.name == "Race"),
+        sessions_list[0] if sessions_list else None,
+    )
+
+    requested_d1 = request.GET.get("d1")
+    requested_d2 = request.GET.get("d2")
+    if requested_d1 and requested_d2:
+        d1 = Driver.objects.filter(acronym=requested_d1).first()
+        d2 = Driver.objects.filter(acronym=requested_d2).first()
+    else:
+        d1 = drivers_list[0] if drivers_list else None
+        d2 = drivers_list[1] if len(drivers_list) > 1 else d1
+
+    session_id = request.GET.get("session")
+    selected_session = default_session
+    if session_id:
+        # Comparar como texto evita ValueError con pk no numérico.
+        selected_session = next(
+            (s for s in sessions_list if str(s.pk) == session_id), None
+        )
+
+    error = ""
+    plot_url = ""
+    source_label = ""
+    job_key = ""
+
+    if not drivers_list or default_session is None:
+        error = "No hay pilotos ni sesiones disponibles para comparar telemetría."
+    elif session_id and selected_session is None:
+        error = "La sesión seleccionada no existe."
+    elif d1 is None or d2 is None:
+        error = "Los pilotos seleccionados no existen."
+    else:
+        error = _driver_season_error(d1, d2, selected_session)
+        if not error:
+            source_label = _source_label(selected_session)
+            try:
+                cached_path = get_cached_telemetry_plot(selected_session, d1, d2)
+            except Exception:
+                # El detalle técnico va al log; al usuario solo un mensaje claro.
+                logger.exception(
+                    "No se pudo consultar la caché de telemetría para %s/%s en la sesión %s",
+                    d1.acronym, d2.acronym, selected_session.pk,
+                )
+                error = TELEMETRY_USER_ERROR
+            else:
+                if cached_path:
+                    plot_url = _media_url(cached_path)
+                else:
+                    job_key = start_job(selected_session, d1, d2).key
+
+    context = {
+        "drivers_list": drivers_list,
+        "sessions_list": sessions_list,
+        "sessions_criterion": sessions_criterion,
+        "season_year": season_year(),
+        "d1": d1,
+        "d2": d2,
+        "selected_session": selected_session,
+        "plot_url": plot_url,
+        "source_label": source_label,
+        "error": error,
+        "job_key": job_key,
+    }
+    return render(request, "f1hub/telemetry.html", context)
+
+
+def telemetry_job_status(request):
+    """Estado JSON del trabajo en segundo plano (sondeo desde la UI)."""
+    job = get_job(request.GET.get("key", ""))
+    if job is None:
+        return JsonResponse(
+            {
+                "status": "unknown",
+                "plot_url": "",
+                "error": TELEMETRY_USER_ERROR,
+            },
+            status=404,
+        )
+
+    return JsonResponse(
+        {
+            "status": job.status,
+            "plot_url": _media_url(job.plot_path),
+            "error": job.error,
+        }
+    )

@@ -1,4 +1,46 @@
-Django>=5.0
-fastf1
-matplotlib
-pandas
+# F1 2026 Season Hub - dependencias fijadas (instalacion reproducible)
+#
+# REQUIERE Python 3.12.x o 3.13.x (recomendado: 3.13).
+#   - Python 3.15 (el interprete actual del sistema) NO sirve: fastf1 exige
+#     pandas<3 y pandas 2.3.3 no publica wheels cp315, asi que pip intentaria
+#     compilar pandas desde el fuente y falla sin toolchain C++/Meson.
+#     Ver RESULTADOS_EJECUCION.md.
+#   - Python 3.14 NO recomendado: fastf1 3.5.3 exige websockets<14 y
+#     websockets 13.1 no tiene wheels cp314 (habria que compilar).
+#
+# Instalacion:
+#   python -m venv .venv
+#   .venv\Scripts\activate
+#   python -m pip install -r requirements.txt
+#
+# Nota: solo se fijan las dependencias directas y las transitivas compiladas
+# criticas. Para un lock completo, volcar `pip freeze` del venv probado aqui.
+
+# Web framework. La migracion f1hub/0001_initial.py se genero con Django 6.0.2,
+# pero se fija 6.1.3: es la version con la que migrate/check/server ya
+# funcionaron en este repo (RESULTADOS_EJECUCION.md) y es compatible con
+# migraciones creadas en la serie 6.0.x.
+Django==6.1.3
+
+# FastF1. 3.5.3 es la ultima version que sigue exportando
+# fastf1.plotting.driver_color(), usado en f1hub/services.py (se elimino en
+# 3.6.0; a partir de ahi el nombre es get_driver_color). Si se sube a >=3.6
+# hay que cambiar las 2 llamadas driver_color -> get_driver_color en
+# f1hub/services.py.
+fastf1==3.5.3
+
+# pandas: restriccion de fastf1 (>=2.1.1,<3.0.0). 2.3.3 es la ultima 2.x y
+# publica wheels cp312/cp313 (tambien cp314).
+pandas==2.3.3
+
+# Graficos (fastf1 exige matplotlib>=3.8,<4)
+matplotlib==3.11.2
+
+# Transitivas compiladas, fijadas para evitar builds desde fuente:
+#  - numpy: la exigen pandas>=1.26, matplotlib>=1.25 y scipy 1.18 (>=2,<2.8)
+#  - scipy: la exige fastf1 (>=1.8.1,<2.0)
+numpy==2.5.5
+scipy==1.18.1
+# websockets: fastf1 3.5.3 fija >=10.3,<14; 13.1 es la ultima <14 con wheels
+# para cp312/cp313
+websockets==13.1

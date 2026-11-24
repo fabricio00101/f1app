@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}F1 2026 Season Hub{% endblock %}</title>
+    <title>{% block title %}F1 {{ season_year }} Season Hub{% endblock %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for the Hamburger Menu icon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -15,7 +15,7 @@
         <!-- Mobile Header (Visible only on small screens) -->
         <header class="mobile-header">
             <div class="sidebar-header">
-                <span class="logo-text">F1 2026</span>
+                <span class="logo-text">F1 {{ season_year }}</span>
                 <span class="hub-text">HUB</span>
             </div>
             <button class="mobile-menu-btn" id="mobile-menu-btn">
@@ -26,7 +26,7 @@
         <!-- Sidebar Calendar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header desktop-only">
-                <span class="logo-text">F1 2026</span>
+                <span class="logo-text">F1 {{ season_year }}</span>
                 <span class="hub-text">HUB</span>
             </div>
             
@@ -68,10 +68,16 @@
                     <a href="{% url 'teams' %}" class="{% if request.resolver_match.url_name == 'teams' %}active{% endif %}">EQUIPOS</a>
                     <a href="{% url 'insights' %}" class="{% if request.resolver_match.url_name == 'insights' %}active{% endif %}">ANÁLISIS</a>
                 </nav>
-                <div class="countdown-module">
-                    <span class="countdown-label">PRÓXIMA CARRERA</span>
-                    <span class="countdown-event">{{ next_event.name|default:"Gran Premio de Australia" }}</span>
-                    <div class="timer" id="countdown-timer" data-date="{{ next_event.date|date:'Y-m-d'|default:'2026-03-01' }}">
+                <div class="countdown-module" data-countdown-state="{{ countdown.status }}">
+                    <span class="countdown-label">{{ countdown.label|default:"PRÓXIMA CARRERA" }}</span>
+                    <span class="countdown-event">{{ countdown.event_name }}</span>
+                    {% if countdown.starts_at %}
+                    <span class="countdown-time">{{ countdown.starts_at|date:"d M Y H:i" }} {{ countdown.timezone }}</span>
+                    {% endif %}
+                    <div class="timer" id="countdown-timer"
+                         data-date="{{ countdown.target }}"
+                         data-end-date="{{ countdown.end_target }}"
+                         data-state="{{ countdown.status }}">
                         <span>00</span>:<span>00</span>:<span>00</span>:<span>00</span>
                     </div>
                 </div>
@@ -79,12 +85,16 @@
             
             <!-- Mobile Countdown Display -->
             <div class="mobile-countdown glass-panel">
-                <div class="countdown-module">
-                    <div class="timer" id="mobile-countdown-timer">
+                <div class="countdown-module" data-countdown-state="{{ countdown.status }}">
+                    <div class="timer" id="mobile-countdown-timer"
+                         data-date="{{ countdown.target }}"
+                         data-end-date="{{ countdown.end_target }}"
+                         data-state="{{ countdown.status }}">
                         <span>00</span>:<span>00</span>:<span>00</span>:<span>00</span>
                     </div>
                     <div class="countdown-info">
-                        <span class="countdown-event">{{ next_event.name|default:"Gran Premio de Australia" }}</span>
+                        <span class="countdown-label">{{ countdown.label|default:"PRÓXIMA CARRERA" }}</span>
+                        <span class="countdown-event">{{ countdown.event_name }}</span>
                     </div>
                 </div>
             </div>
@@ -111,43 +121,74 @@
             overlay.addEventListener('click', toggleSidebar);
         });
 
-        // Simple countdown logic for both timers
+        // Countdown compartido: escritorio y móvil usan la misma hora real de la carrera.
         document.addEventListener("DOMContentLoaded", () => {
-            const timerEl = document.getElementById("countdown-timer");
-            const mobileTimerEl = document.getElementById("mobile-countdown-timer");
-            if (!timerEl) return;
+            const desktopTimer = document.getElementById("countdown-timer");
+            const mobileTimer = document.getElementById("mobile-countdown-timer");
+            const source = desktopTimer || mobileTimer; // el móvil también puede iniciar solo
+            if (!source) return;
 
-            const targetDateStr = timerEl.getAttribute("data-date");
-            if (!targetDateStr) return;
+            const timers = [desktopTimer, mobileTimer].filter(Boolean);
+            const labels = Array.from(document.querySelectorAll(".countdown-module .countdown-label"));
+            const initialState = source.getAttribute("data-state") || "";
+            const startMs = Date.parse(source.getAttribute("data-date") || "");
+            const endMs = Date.parse(source.getAttribute("data-end-date") || "");
 
-            // Set target to 15:00:00 UTC on the race day
-            const targetDate = new Date(`${targetDateStr}T15:00:00Z`).getTime();
+            const messages = {
+                in_progress: "EN CURSO",
+                finished: "FINALIZADA",
+                no_races: "SIN PRÓXIMA CARRERA",
+            };
+
+            const paint = (html, text, state) => {
+                timers.forEach((timer) => { timer.innerHTML = html; });
+                if (text) labels.forEach((label) => { label.textContent = text; });
+                if (state) timers.forEach((timer) => { timer.setAttribute("data-state", state); });
+            };
+
+            const showState = (key) => paint(
+                `<span class="countdown-state">${messages[key]}</span>`,
+                messages[key],
+                key,
+            );
+
+            if (initialState in messages || !Number.isFinite(startMs)) {
+                showState(initialState in messages ? initialState : "no_races");
+                return;
+            }
+
+            const pad = (n) => n.toString().padStart(2, "0");
+            const finishAt = Number.isFinite(endMs) ? endMs : startMs + 2 * 60 * 60 * 1000;
 
             function updateTimers() {
-                const now = new Date().getTime();
-                const distance = targetDate - now;
-
-                if (distance < 0) {
-                    const finishedText = "<span>00</span>:<br><span>00</span>:<br><span>00</span>:<br><span>00</span>";
-                    timerEl.innerHTML = finishedText;
-                    if(mobileTimerEl) mobileTimerEl.innerHTML = finishedText;
-                    return;
+                const now = Date.now();
+                if (now >= finishAt) {
+                    showState("finished");
+                    return false;
+                }
+                if (now >= startMs) {
+                    showState("in_progress");
+                    return false;
                 }
 
+                const distance = startMs - now;
                 const days = Math.floor(distance / (1000 * 60 * 60 * 24));
                 const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
                 const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-                const format = (n) => n.toString().padStart(2, "0");
-                const htmlString = `<span>${format(days)}</span>:<span>${format(hours)}</span>:<span>${format(minutes)}</span>:<span>${format(seconds)}</span>`;
-                
-                timerEl.innerHTML = htmlString;
-                if(mobileTimerEl) mobileTimerEl.innerHTML = htmlString;
+                paint(
+                    `<span>${pad(days)}</span>:<span>${pad(hours)}</span>:<span>${pad(minutes)}</span>:<span>${pad(seconds)}</span>`,
+                    null,
+                    "upcoming",
+                );
+                return true;
             }
 
-            setInterval(updateTimers, 1000);
-            updateTimers(); // call immediately once
+            if (!updateTimers()) return;
+            const intervalId = setInterval(() => {
+                if (!updateTimers()) clearInterval(intervalId);
+            }, 1000);
         });
     </script>
 </body>
