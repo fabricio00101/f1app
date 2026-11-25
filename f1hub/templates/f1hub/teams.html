@@ -12,7 +12,8 @@
             {% for team in teams_list %}
             <div class="driver-card" style="flex: 1; min-width: 250px; background: rgba(255,255,255,0.02); padding: 20px; border-radius: 8px;">
                 <h3 style="font-family: var(--font-heading); font-size: 24px; color: var(--electric-blue);">{{ team.team }}</h3>
-                <p style="color: var(--text-muted); margin-top: 10px;">En desarrollo para {{ season_year }}.</p>
+                <p style="color: var(--text-muted); margin-top: 10px;">TEMPORADA {{ season_year }} &middot; PLANTILLA DE {{ team.driver_count }} piloto{{ team.driver_count|pluralize }}</p>
+                <p style="color: var(--text-muted); margin-top: 6px;"><strong>Pilotos:</strong> {% for driver in team.drivers %}{{ driver.acronym }} ({{ driver.nationality }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>
             </div>
             {% empty %}
             <p>No hay información de equipos.</p>

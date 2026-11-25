@@ -30,7 +30,7 @@ from f1hub.jobs import (
 from f1hub.models import STATUS_GENERATING as MODEL_GENERATING
 from f1hub.models import STATUS_READY as MODEL_READY
 from f1hub.models import TelemetryJob as JobRow
-from f1hub.services import build_cache_key
+from f1hub.services import TELEMETRY_UNAVAILABLE_MESSAGE, TelemetryUnavailable, build_cache_key
 
 from .helpers import make_driver, make_event, make_season, make_session
 
@@ -159,6 +159,18 @@ class JobRegistryTests(TransactionTestCase):
         self.assertEqual(row.status, STATUS_ERROR)
         self.assertEqual(row.error, TELEMETRY_USER_ERROR)
         self.assertIsNotNone(row.finished_at)
+
+    @patch("f1hub.jobs.get_or_generate_telemetry_plot")
+    def test_domain_error_message_is_persisted_for_the_ui(self, generate):
+        generate.side_effect = TelemetryUnavailable(TELEMETRY_UNAVAILABLE_MESSAGE)
+
+        with self.assertLogs("f1hub.jobs", level="WARNING") as logs:
+            job = start_job(self.session, self.col, self.ver)
+            state = self._wait_for_status(job.key, STATUS_ERROR)
+
+        self.assertEqual(state.error, TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertEqual(JobRow.objects.get(key=job.key).error, TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertIn(TELEMETRY_UNAVAILABLE_MESSAGE, "\n".join(logs.output))
 
     @patch("f1hub.jobs.get_or_generate_telemetry_plot", return_value=PLOT_PATH)
     def test_unknown_key_and_clear_jobs(self, generate):

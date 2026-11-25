@@ -32,7 +32,12 @@ from .models import (
     Session,
     TelemetryJob as JobRow,
 )
-from .services import _plot_file_path, build_cache_key, get_or_generate_telemetry_plot
+from .services import (
+    TelemetryUnavailable,
+    _plot_file_path,
+    build_cache_key,
+    get_or_generate_telemetry_plot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,16 +238,13 @@ def _run_job(job_pk, session_pk, driver1_pk, driver2_pk, label):
         plot_path = get_or_generate_telemetry_plot(session, driver1, driver2)
         if not plot_path:
             raise RuntimeError("El servicio no devolvió una ruta de gráfico.")
+    except TelemetryUnavailable as exc:
+        # Mensaje de dominio: ya es amigable, la UI lo muestra tal cual.
+        logger.warning("Telemetría no disponible en el trabajo %s: %s", label, exc)
+        error = str(exc) or TELEMETRY_USER_ERROR
     except Exception:
         logger.exception("Falló el trabajo de telemetría %s", label)
-        finished = timezone.now()
-        _update_job(
-            {"pk": job_pk},
-            status=STATUS_ERROR,
-            error=TELEMETRY_USER_ERROR,
-            finished_at=finished,
-            updated_at=finished,
-        )
+        error = TELEMETRY_USER_ERROR
     else:
         finished = timezone.now()
         _update_job(
@@ -253,5 +255,15 @@ def _run_job(job_pk, session_pk, driver1_pk, driver2_pk, label):
             finished_at=finished,
             updated_at=finished,
         )
+        return
     finally:
         close_old_connections()
+
+    finished = timezone.now()
+    _update_job(
+        {"pk": job_pk},
+        status=STATUS_ERROR,
+        error=error,
+        finished_at=finished,
+        updated_at=finished,
+    )

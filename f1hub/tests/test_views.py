@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -91,12 +91,38 @@ class ViewTests(TestCase):
         self.assertContains(response, "Franco Colapinto")
         self.assertEqual(list(response.context["drivers_list"]), [self.col, self.ver])
 
-    def test_teams_view_lists_distinct_teams(self):
+    def test_teams_view_lists_distinct_teams_with_real_driver_data(self):
+        make_driver("NOR", "Lando Norris", "Red Bull", "GBR")
         response = self.client.get(reverse("teams"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alpine F1 Team")
-        teams = [row["team"] for row in response.context["teams_list"]]
-        self.assertEqual(sorted(teams), ["Alpine F1 Team", "Red Bull"])
+        self.assertContains(response, "Red Bull")
+        self.assertContains(response, "EQUIPOS DE LA TEMPORADA 2026")
+        self.assertContains(response, "PLANTILLA DE 2 pilotos")
+        self.assertContains(response, "NOR (GBR), VER (NED)")
+        self.assertContains(response, "COL (ARG)")
+        # El placeholder original ya no debe aparecer en ninguna tarjeta.
+        self.assertNotContains(response, "En desarrollo para 2026.")
+
+        teams = {row["team"]: row for row in response.context["teams_list"]}
+        self.assertEqual(set(teams), {"Alpine F1 Team", "Red Bull"})
+        self.assertEqual(teams["Red Bull"]["driver_count"], 2)
+        self.assertEqual(
+            [d["acronym"] for d in teams["Red Bull"]["drivers"]], ["NOR", "VER"]
+        )
+        self.assertEqual(teams["Alpine F1 Team"]["driver_count"], 1)
+        self.assertEqual(teams["Alpine F1 Team"]["drivers"], [
+            {"acronym": "COL", "nationality": "ARG"}
+        ])
+
+    @override_settings(F1_SEASON_YEAR=2027)
+    def test_teams_view_uses_configurable_season_year(self):
+        response = self.client.get(reverse("teams"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "F1 2027 Season Hub")
+        self.assertContains(response, "EQUIPOS DE LA TEMPORADA 2027")
+        self.assertContains(response, "TEMPORADA 2027")
+        self.assertNotContains(response, "En desarrollo para 2027.")
 
     def test_insights_view_returns_200(self):
         response = self.client.get(reverse("insights"))

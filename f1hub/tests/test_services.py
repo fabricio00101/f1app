@@ -8,12 +8,18 @@ from unittest.mock import MagicMock, patch
 import matplotlib
 matplotlib.use("Agg")  # backend headless: los tests no abren ventanas
 import pandas as pd
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from f1hub import services
 from f1hub.models import TelemetryCache
-from f1hub.services import build_cache_key, get_or_generate_telemetry_plot
+from f1hub.services import (
+    TELEMETRY_UNAVAILABLE_MESSAGE,
+    TelemetryUnavailable,
+    build_cache_key,
+    get_or_generate_telemetry_plot,
+)
 
 from .helpers import make_driver, make_event, make_season, make_session
 
@@ -197,3 +203,76 @@ class TelemetryServiceTests(TestCase):
         self.assertEqual(self.fastf1_mock.get_session.call_count, 2)
         self.assertEqual(TelemetryCache.objects.count(), 1)
         self.assertTrue(os.path.isfile(os.path.join(self.media_root, new_path)))
+
+    # La sesión se carga antes de tocar ``laps`` (DataNotLoadedError en 3.9.2).
+    def test_session_is_loaded_before_laps_are_accessed(self):
+        session_mock = self.fastf1_mock.get_session.return_value
+        ordered = MagicMock()
+        ordered.attach_mock(session_mock.load, "load")
+        ordered.attach_mock(session_mock.laps.pick_driver, "pick_driver")
+
+        path = get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertTrue(os.path.isfile(os.path.join(self.media_root, path)))
+        session_mock.load.assert_called_once_with(
+            laps=True, telemetry=True, weather=False, messages=False
+        )
+        names = [name for name, _, _ in ordered.mock_calls]
+        self.assertEqual(names[0], "load")
+        self.assertLess(names.index("load"), names.index("pick_driver"))
+
+    # Las deprecaciones de fastf1 3.9.2 quedan fuera del código.
+    def test_uses_configure_and_setup_mpl_without_deprecated_arguments(self):
+        get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        cache_dir = os.path.join(str(settings.BASE_DIR), "fastf1_cache")
+        self.fastf1_mock.Cache.configure.assert_called_once_with(cache_dir=cache_dir)
+        self.fastf1_mock.Cache.enable_cache.assert_not_called()
+        self.fastf1_mock.plotting.setup_mpl.assert_called_once_with()
+
+    def test_failed_session_load_raises_friendly_domain_error(self):
+        self.fastf1_mock.get_session.return_value.load.side_effect = RuntimeError(
+            "detalle tecnico de la carga"
+        )
+
+        with self.assertLogs("f1hub.services", level="ERROR"):
+            with self.assertRaises(TelemetryUnavailable) as error:
+                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertNotIn("detalle tecnico", str(error.exception))
+        self.assertEqual(TelemetryCache.objects.count(), 0)
+        self.assertEqual(self._tmp_files(), [])
+
+    def test_missing_laps_raise_friendly_domain_error(self):
+        empty_laps = MagicMock()
+        empty_laps.empty = True
+        original = self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect
+
+        def pick_driver(code):
+            return empty_laps if code == "VER" else original(code)
+
+        self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect = pick_driver
+
+        with self.assertLogs("f1hub.services", level="ERROR"):
+            with self.assertRaises(TelemetryUnavailable) as error:
+                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertEqual(TelemetryCache.objects.count(), 0)
+
+    def test_empty_telemetry_raises_friendly_domain_error(self):
+        empty_telemetry = MagicMock()
+        empty_telemetry.empty = True
+        empty_telemetry.add_distance.return_value = empty_telemetry
+        ver_laps = self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect(
+            "VER"
+        )
+        ver_laps.pick_fastest.return_value.get_telemetry.return_value = empty_telemetry
+
+        with self.assertLogs("f1hub.services", level="ERROR"):
+            with self.assertRaises(TelemetryUnavailable) as error:
+                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertEqual(TelemetryCache.objects.count(), 0)

@@ -45,8 +45,25 @@ def drivers(request):
 
 
 def teams(request):
-    # Distinct teams
-    teams_list = Driver.objects.values("team").distinct()
+    # Una sola consulta para todos los equipos: traemos solo los campos reales
+    # de los pilotos y agrupamos en Python. Así evitamos N+1 y agregados
+    # específicos de backend (StringAgg/ArrayAgg) que no funcionan en SQLite.
+    teams_by_name = {}
+    rows = (
+        Driver.objects.values("team", "acronym", "nationality")
+        .order_by("team", "acronym")
+    )
+    for row in rows:
+        team = teams_by_name.setdefault(
+            row["team"],
+            {"team": row["team"], "driver_count": 0, "drivers": []},
+        )
+        team["driver_count"] += 1
+        team["drivers"].append(
+            {"acronym": row["acronym"], "nationality": row["nationality"]}
+        )
+
+    teams_list = list(teams_by_name.values())
     return render(request, "f1hub/teams.html", {"teams_list": teams_list})
 
 

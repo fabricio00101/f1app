@@ -33,6 +33,18 @@ from .models import TelemetryCache
 
 logger = logging.getLogger(__name__)
 
+# Error de dominio: el mensaje es seguro para mostrarlo en la UI (sin tracebacks
+# ni detalles técnicos) y el worker lo persiste en la fila del trabajo.
+TELEMETRY_UNAVAILABLE_MESSAGE = (
+    "No hay vueltas ni telemetría disponibles para estos pilotos en la sesión "
+    "seleccionada. Probá con otra sesión o intentá nuevamente más tarde."
+)
+
+
+class TelemetryUnavailable(Exception):
+    """No hay datos de telemetría utilizables para la sesión o la pareja."""
+
+
 # Colores fijos para siglas que fastf1 no reconoce (p. ej. pilotos nuevos de 2026).
 _FALLBACK_COLORS = ("#E10600", "#3671C6", "#FF8000", "#27F4D2", "#009688", "#C800FF")
 
@@ -158,10 +170,12 @@ def _generate_plot(session_obj, first, second, key):
     os.makedirs(media_dir, exist_ok=True)
     filepath = os.path.join(media_dir, os.path.basename(rel_path))
 
-    # Configuración de FastF1 / matplotlib.
+    # Configuración de FastF1 / matplotlib (API de fastf1 3.9.2).
+    # ``configure`` exige que el directorio exista, incluso en un deploy nuevo.
     cache_dir = os.path.join(str(settings.BASE_DIR), 'fastf1_cache')
-    fastf1.Cache.enable_cache(str(cache_dir))
-    fastf1.plotting.setup_mpl(misc_mpl_mods=False)
+    os.makedirs(cache_dir, exist_ok=True)
+    fastf1.Cache.configure(cache_dir=str(cache_dir))
+    fastf1.plotting.setup_mpl()
 
     session_identifier = _SESSION_MAPPING.get(
         session_obj.name, session_obj.name
@@ -171,15 +185,29 @@ def _generate_plot(session_obj, first, second, key):
         session_obj.event.round_number,
         session_identifier,
     )
-    f1_session.load(telemetry=True, laps=True, weather=False)
+    # Sin esta llamada, ``Session.laps`` lanza DataNotLoadedError en fastf1 3.x.
+    # Solo se cargan las vueltas y la telemetría que usa este gráfico.
+    try:
+        f1_session.load(laps=True, telemetry=True, weather=False, messages=False)
+    except Exception as exc:
+        logger.warning("No se pudo cargar la sesión de FastF1: %s", exc)
+        raise TelemetryUnavailable(TELEMETRY_UNAVAILABLE_MESSAGE) from exc
 
-    laps_first = f1_session.laps.pick_driver(first.acronym)
-    laps_second = f1_session.laps.pick_driver(second.acronym)
-    if laps_first.empty or laps_second.empty:
-        raise ValueError("Laps not found for one or both drivers in this session.")
+    try:
+        laps_first = f1_session.laps.pick_driver(first.acronym)
+        laps_second = f1_session.laps.pick_driver(second.acronym)
+        if laps_first.empty or laps_second.empty:
+            raise TelemetryUnavailable(TELEMETRY_UNAVAILABLE_MESSAGE)
 
-    tel_first = laps_first.pick_fastest().get_telemetry().add_distance()
-    tel_second = laps_second.pick_fastest().get_telemetry().add_distance()
+        tel_first = laps_first.pick_fastest().get_telemetry().add_distance()
+        tel_second = laps_second.pick_fastest().get_telemetry().add_distance()
+        if getattr(tel_first, "empty", False) or getattr(tel_second, "empty", False):
+            raise TelemetryUnavailable(TELEMETRY_UNAVAILABLE_MESSAGE)
+    except TelemetryUnavailable:
+        raise
+    except Exception as exc:
+        logger.warning("Telemetría no disponible para la sesión %s: %s", session_obj.pk, exc)
+        raise TelemetryUnavailable(TELEMETRY_UNAVAILABLE_MESSAGE) from exc
 
     season = session_obj.event.season.year
     color_first = _resolve_driver_color(first.acronym, season, 0, f1_session)
