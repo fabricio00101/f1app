@@ -1,13 +1,14 @@
 {% extends 'f1hub/base.html' %}
 
-{% block title %}Telemetría | F1 {{ season_year }} Season Hub{% endblock %}
+{% block title %}Tiempos por vuelta | F1 {{ season_year }} Season Hub{% endblock %}
 
 {% block content %}
 <section class="telemetry-module glass-panel" id="telemetry-panel">
     <div class="panel-header">
-        <h2>COMPARACIÓN DE TELEMETRÍA</h2>
+        <h2>COMPARACIÓN DE TIEMPOS POR VUELTA</h2>
         <span class="accent-badge">DATOS REALES</span>
     </div>
+    <p><span class="stat-label">TIEMPOS POR VUELTA · FastF1 (Ergast) · sin F1TV</span></p>
 
     <form method="get" action="{% url 'telemetry' %}" id="telemetry-form">
         <div class="driver-stats">
@@ -43,7 +44,7 @@
 
     <div id="telemetry-loading" data-state="generando" data-job-key="{{ job_key }}"
          data-status-url="{% url 'telemetry_job_status' %}" {% if not job_key %}hidden{% endif %}>
-        <span class="stat-label">Generando telemetría… la primera comparación puede demorar unos segundos. Esta página se actualizará sola cuando termine.</span>
+        <span class="stat-label">Generando la comparación de tiempos por vuelta… la primera consulta puede demorar unos segundos. Esta página se actualizará sola cuando termine.</span>
     </div>
     <div id="telemetry-async-result" hidden></div>
 
@@ -54,19 +55,19 @@
     {% elif plot_url %}
     <figure class="telemetry-result" data-state="success">
         <div class="chart-container">
-            <img src="{{ plot_url }}" alt="Comparación de velocidad entre {{ d1.name }} y {{ d2.name }}" style="max-width: 100%; height: auto;">
+            <img src="{{ plot_url }}" alt="Comparación de tiempos por vuelta entre {{ d1.name }} y {{ d2.name }}" style="max-width: 100%; height: auto;">
         </div>
         <figcaption>
-            <span class="stat-label">Fuente: {{ source_label }} · FastF1 · vuelta más rápida de cada piloto.</span>
+            <span class="stat-label">Fuente: {{ source_label }} · FastF1 (Ergast) · sin F1TV. Eje X: vuelta; eje Y: segundos.</span>
         </figcaption>
     </figure>
     {% elif not job_key %}
     <div class="chart-container" data-state="empty" style="display: flex; align-items: center; justify-content: center;">
-        <span class="stat-label">Sin telemetría disponible. Elegí dos pilotos y una sesión para comparar.</span>
+        <span class="stat-label">Sin tiempos por vuelta disponibles. Elegí dos pilotos y una sesión para comparar.</span>
     </div>
     {% endif %}
 
-    <p><span class="stat-label">Datos de calendario y pilotos: FastF1 · temporada {{ season_year }}.</span></p>
+    <p><span class="stat-label">Datos de calendario y pilotos: FastF1 · temporada {{ season_year }}. Sin F1TV ni credenciales.</span></p>
 </section>
 
 <script>
@@ -122,7 +123,7 @@
             chart.className = "chart-container";
             const image = document.createElement("img");
             image.src = url;
-            image.alt = "Comparación de velocidad entre {{ d1.name|escapejs }} y {{ d2.name|escapejs }}";
+            image.alt = "Comparación de tiempos por vuelta entre {{ d1.name|escapejs }} y {{ d2.name|escapejs }}";
             image.style.maxWidth = "100%";
             image.style.height = "auto";
             chart.appendChild(image);
@@ -130,7 +131,7 @@
             const caption = document.createElement("figcaption");
             const text = document.createElement("span");
             text.className = "stat-label";
-            text.textContent = "Fuente: {{ source_label|escapejs }} · FastF1 · vuelta más rápida de cada piloto.";
+            text.textContent = "Fuente: {{ source_label|escapejs }} · FastF1 (Ergast) · sin F1TV. Eje X: vuelta; eje Y: segundos.";
             caption.appendChild(text);
             figure.appendChild(caption);
             result.replaceChildren(figure);

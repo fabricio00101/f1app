@@ -8,8 +8,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from f1hub import jobs as jobs_module
 from f1hub.jobs import STATUS_PENDING, STATUS_READY
-from f1hub.models import TelemetryJob as JobRow
+from f1hub.models import DriverStanding, TelemetryJob as JobRow
 from f1hub.services import build_cache_key
 
 from .helpers import make_driver, make_event, make_season, make_session
@@ -65,6 +66,63 @@ class TelemetryViewTests(TestCase):
 
     @patch("f1hub.views.start_job")
     @patch("f1hub.views.get_cached_telemetry_plot")
+    def test_default_uses_standings_leaders(self, cached, start_job):
+        ant = make_driver("ANT", "Andrea Kimi Antonelli", "Mercedes", "ITA")
+        ant.season = self.season
+        ant.save(update_fields=["season"])
+        DriverStanding.objects.create(
+            season_year=2026, position=1, points=402, wins=7,
+            driver_code="ANT", driver_name="Andrea Kimi Antonelli",
+            constructor_name="Mercedes",
+        )
+        DriverStanding.objects.create(
+            season_year=2026, position=2, points=304, wins=5,
+            driver_code="VER", driver_name="Max Verstappen",
+            constructor_name="Red Bull",
+        )
+        # Otra temporada no debe influir en el default de 2026.
+        DriverStanding.objects.create(
+            season_year=2025, position=1, points=999, wins=10,
+            driver_code="NOR", driver_name="Lando Norris",
+            constructor_name="McLaren",
+        )
+        cached.return_value = PLOT_PATH
+
+        response = self.client.get(reverse("telemetry"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["d1"], ant)
+        self.assertEqual(response.context["d2"], self.ver)
+        cached.assert_called_once_with(self.race, ant, self.ver)
+        start_job.assert_not_called()
+
+    @patch("f1hub.services.fetch_lap_comparison", return_value=[])
+    @patch("f1hub.jobs._launch_worker", return_value=None)
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value="")
+    def test_pair_without_shared_laps_reports_friendly_error(self, cached, launch, fetch):
+        alb = make_driver("ALB", "Alex Albon", "Williams", "THA")
+        alb.season = self.season
+        alb.save(update_fields=["season"])
+        ant = make_driver("ANT", "Andrea Kimi Antonelli", "Mercedes", "ITA")
+        ant.season = self.season
+        ant.save(update_fields=["season"])
+
+        response = self.client.get(reverse("telemetry"), {"d1": "ALB", "d2": "ANT"})
+        key = response.context["job_key"]
+        self.assertTrue(key)
+
+        # El worker se ejecuta acá mismo (sin hilo) con la fuente mockeada.
+        row = JobRow.objects.get(key=key)
+        jobs_module._run_job(row.pk, self.race.pk, alb.pk, ant.pk, "prueba ALB/ANT")
+        status = self.client.get(reverse("telemetry_job_status"), {"key": key})
+
+        self.assertEqual(status.json()["status"], "error")
+        self.assertIn("tiempos por vuelta", status.json()["error"].lower())
+        self.assertNotIn("detalle tecnico", status.json()["error"].lower())
+        fetch.assert_called_once_with(2026, 22, "ALB", "ANT")
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot")
     def test_renders_image_and_source_metadata(self, cached, start_job):
         cached.return_value = PLOT_PATH
 
@@ -80,6 +138,17 @@ class TelemetryViewTests(TestCase):
         self.assertEqual(response.context["source_label"], label)
         self.assertContains(response, label)
         self.assertContains(response, "FastF1")
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value=PLOT_PATH)
+    def test_page_labels_lap_times_without_f1tv(self, cached, start_job):
+        response = self.client.get(reverse("telemetry"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "TIEMPOS POR VUELTA · FastF1 (Ergast) · sin F1TV")
+        self.assertContains(response, "Comparación de tiempos por vuelta entre")
+        self.assertNotContains(response, "Comparación de velocidad")
+        self.assertNotContains(response, "vuelta más rápida")
 
     @patch("f1hub.views.start_job")
     @patch("f1hub.views.get_cached_telemetry_plot")
@@ -279,3 +348,92 @@ class TelemetryViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ready")
         self.assertTrue(response.json()["plot_url"].endswith(PLOT_PATH))
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value=PLOT_PATH)
+    def test_default_is_last_completed_race_and_selector_excludes_future_sessions(
+        self, cached, start_job
+    ):
+        future_event = make_event(
+            self.season,
+            round_number=23,
+            event_date=(timezone.now() + timedelta(days=11)).date(),
+            name="Abu Dhabi Grand Prix",
+        )
+        future_fp = make_session(
+            future_event,
+            name="FP1",
+            date_time=timezone.now() + timedelta(days=10),
+        )
+        future_race = make_session(
+            future_event,
+            name="Race",
+            date_time=timezone.now() + timedelta(days=11),
+        )
+
+        response = self.client.get(reverse("telemetry"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_session"], self.race)
+        cached.assert_called_once_with(self.race, self.col, self.nor)
+        start_job.assert_not_called()
+        offered = list(response.context["sessions_list"])
+        self.assertNotIn(future_fp, offered)
+        self.assertNotIn(future_race, offered)
+        self.assertNotContains(response, f'value="{future_fp.pk}"')
+        self.assertNotContains(response, f'value="{future_race.pk}"')
+        self.assertContains(response, "ya disputadas")
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot")
+    def test_future_race_cannot_be_selected_by_id(self, cached, start_job):
+        future_event = make_event(
+            self.season,
+            round_number=23,
+            event_date=(timezone.now() + timedelta(days=11)).date(),
+            name="Abu Dhabi Grand Prix",
+        )
+        future_race = make_session(
+            future_event,
+            name="Race",
+            date_time=timezone.now() + timedelta(days=11),
+        )
+
+        response = self.client.get(
+            reverse("telemetry"), {"session": future_race.pk}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "La sesión seleccionada no existe.")
+        self.assertContains(response, "ya disputadas")
+        self.assertIsNone(response.context["selected_session"])
+        self.assertEqual(response.context["plot_url"], "")
+        cached.assert_not_called()
+        start_job.assert_not_called()
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot")
+    def test_no_completed_race_shows_clear_empty_state(self, cached, start_job):
+        self.race.delete()
+
+        response = self.client.get(reverse("telemetry"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Todavía no hay carreras disputadas")
+        self.assertIsNone(response.context["selected_session"])
+        self.assertEqual(response.context["plot_url"], "")
+        self.assertContains(response, 'data-state="error"')
+        cached.assert_not_called()
+        start_job.assert_not_called()
+
+    @patch("f1hub.views.start_job")
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value=PLOT_PATH)
+    def test_completed_non_race_session_can_still_be_selected(self, cached, start_job):
+        self.race.delete()
+
+        response = self.client.get(reverse("telemetry"), {"session": self.fp1.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_session"], self.fp1)
+        cached.assert_called_once_with(self.fp1, self.col, self.nor)
+        start_job.assert_not_called()

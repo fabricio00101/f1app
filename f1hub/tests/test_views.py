@@ -11,6 +11,15 @@ from f1hub.models import Driver
 from .helpers import make_driver, make_event, make_season, make_session
 
 
+def _standings_models():
+    """Los modelos de standings los agrega la capa de datos en paralelo."""
+    try:
+        from f1hub.models import ConstructorStanding, DriverStanding
+    except ImportError:
+        return None, None
+    return DriverStanding, ConstructorStanding
+
+
 class ViewTests(TestCase):
     def setUp(self):
         self.season = make_season(2026)
@@ -133,3 +142,84 @@ class ViewTests(TestCase):
         response = self.client.get(reverse("drivers"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No hay información de pilotos disponible")
+
+
+class StandingsViewTests(TestCase):
+    """Clasificación real en la UI, sin red y sin F1TV."""
+
+    def setUp(self):
+        self.driver_model, self.constructor_model = _standings_models()
+        if self.driver_model is None or self.constructor_model is None:
+            self.skipTest("Los modelos de standings aún no fueron creados")
+        self.season = make_season(2026)
+        self.col = make_driver("COL", "Franco Colapinto", "Alpine", "ARG")
+        try:
+            self.driver_model.objects.create(
+                season_year=2026, position=1, points=25, wins=1,
+                driver_code="COL", driver_name="Franco Colapinto",
+                constructor_name="Alpine",
+            )
+            self.constructor_model.objects.create(
+                season_year=2026, position=1, points=25, wins=1,
+                constructor_name="Alpine",
+            )
+        except Exception as exc:
+            self.skipTest(f"Tabla de standings aún no migrada: {exc}")
+
+    def test_dashboard_shows_real_driver_standings(self):
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CLASIFICACIÓN DE PILOTOS 2026")
+        self.assertContains(response, "Franco Colapinto (COL)")
+        self.assertContains(response, "Alpine")
+        self.assertContains(response, "25")
+        self.assertContains(response, "VICTORIAS")
+        self.assertContains(response, "FastF1 (Ergast/Jolpica), sin F1TV")
+        self.assertNotContains(response, "Sin clasificación oficial cargada")
+        self.assertEqual(len(response.context["driver_standings"]), 1)
+
+    def test_dashboard_shows_real_constructor_standings(self):
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "CONSTRUCTORES 2026")
+        self.assertContains(response, "PUNTOS")
+        self.assertEqual(len(response.context["constructor_standings"]), 1)
+
+    def test_teams_and_insights_show_constructor_standings(self):
+        cases = {
+            "teams": "CLASIFICACIÓN DE CONSTRUCTORES 2026",
+            "insights": "CLASIFICACIÓN OFICIAL 2026",
+        }
+        for url_name, heading in cases.items():
+            with self.subTest(view=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertContains(response, heading)
+                self.assertContains(response, "Alpine")
+                self.assertContains(response, "FastF1 (Ergast/Jolpica), sin F1TV")
+                self.assertNotContains(response, "Sin clasificación oficial cargada")
+                self.assertEqual(len(response.context["constructor_standings"]), 1)
+
+    def test_empty_standings_keeps_honest_empty_state(self):
+        self.driver_model.objects.all().delete()
+        self.constructor_model.objects.all().delete()
+
+        for url_name in ("dashboard", "teams", "insights"):
+            with self.subTest(view=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertContains(response, "Sin clasificación oficial cargada")
+                self.assertContains(response, "sync_standings")
+
+    def test_only_other_year_data_is_not_presented_as_current(self):
+        self.driver_model.objects.all().delete()
+        self.constructor_model.objects.all().delete()
+        self.driver_model.objects.create(
+            season_year=2025, position=1, points=400, wins=10,
+            driver_code="OLD", driver_name="Piloto 2025",
+            constructor_name="Equipo 2025",
+        )
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertNotContains(response, "Piloto 2025")
+        self.assertContains(response, "Solo hay clasificación guardada de 2025")

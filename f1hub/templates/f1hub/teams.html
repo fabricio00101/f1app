@@ -6,6 +6,36 @@
 <div class="dashboard-grid">
     <section class="glass-panel" style="grid-column: 1 / -1;">
         <div class="panel-header">
+            <h2>CLASIFICACIÓN DE CONSTRUCTORES {{ standings_year }}</h2>
+            <span class="accent-badge">{% if constructor_standings %}DATOS REALES{% else %}SIN CLASIFICACIÓN{% endif %}</span>
+        </div>
+        {% if constructor_standings %}
+        <div class="table-container">
+            <table>
+                <thead><tr><th>POS</th><th>EQUIPO</th><th>PUNTOS</th><th>VICTORIAS</th></tr></thead>
+                <tbody>
+                    {% for row in constructor_standings %}
+                    <tr>
+                        <td>{{ row.position }}</td>
+                        <td>{{ row.constructor_name }}</td>
+                        <td>{{ row.points }}</td>
+                        <td>{{ row.wins }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p><span class="stat-label">Fuente: {{ standings_source }}. Datos persistidos por <code>sync_standings</code>; esta vista no consulta la red.</span></p>
+        {% else %}
+        <p><span class="stat-label">Sin clasificación oficial cargada para {{ standings_year }}. Ejecutá <code>sync_standings</code> para publicar posiciones y puntos ({{ standings_source }}).</span></p>
+        {% if standings_other_years %}
+        <p><span class="stat-label">Solo hay clasificación guardada de {{ standings_other_years|join:", " }}; no se muestra como si fuera de {{ standings_year }}.</span></p>
+        {% endif %}
+        {% endif %}
+    </section>
+
+    <section class="glass-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
             <h2>EQUIPOS DE LA TEMPORADA {{ season_year }}</h2>
         </div>
         <div class="table-container" style="display: flex; flex-wrap: wrap; gap: 20px;">

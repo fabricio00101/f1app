@@ -7,7 +7,7 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from django.utils import timezone
 
-from .context_processors import season_year
+from .context_processors import season_year, standings_context
 from .jobs import TELEMETRY_USER_ERROR, get_job, start_job
 from .models import Driver, Session
 from .services import get_cached_telemetry_plot
@@ -19,8 +19,8 @@ def dashboard(request):
     # Find Colapinto data
     colapinto = Driver.objects.filter(acronym="COL").first()
 
-    # No hay puntos ni posiciones oficiales en la BD: solo listamos los
-    # equipos reales derivados de los pilotos, sin simular una clasificación.
+    # Equipos derivados de los pilotos: se mantiene como estado vacío cuando
+    # todavía no hay standings persistidos (los traerá ``sync_standings``).
     constructors = [
         {"name": row["team"]}
         for row in Driver.objects.exclude(team="")
@@ -29,10 +29,25 @@ def dashboard(request):
         .order_by("team")
     ]
 
+    # La clasificación real (driver_standings / constructor_standings) la
+    # inyecta race_context desde la BD. Acá solo resolvemos la fila del piloto
+    # destacado para no buscarla dentro de la plantilla.
+    colapinto_standing = None
+    if colapinto:
+        colapinto_standing = next(
+            (
+                row
+                for row in standings_context(season_year())["driver_standings"]
+                if row.driver_code == colapinto.acronym
+            ),
+            None,
+        )
+
     # next_event, calendar_events y today los aporta race_context (context
     # processor), para que el layout use los mismos datos en todas las vistas.
     context = {
         "colapinto": colapinto,
+        "colapinto_standing": colapinto_standing,
         "constructors": constructors,
     }
 
@@ -112,6 +127,32 @@ def _session_limit():
     return limit if limit > 0 else 50
 
 
+def _default_driver_pair(drivers_list):
+    """Devuelve los dos líderes de la clasificación persistida.
+
+    La vista usa los dos primeros ``DriverStanding`` por ``position`` de la
+    temporada activa (hoy ANT y VER), porque suelen ser los que tienen vueltas
+    compartidas en Ergast. Solo se aceptan códigos presentes en la tabla
+    ``Driver``; si no hay dos, se completa con el orden alfabético de siempre.
+    """
+    by_code = {driver.acronym: driver for driver in drivers_list}
+    chosen = []
+    for row in standings_context(season_year())["driver_standings"]:
+        driver = by_code.get(getattr(row, "driver_code", ""))
+        if driver is not None and driver not in chosen:
+            chosen.append(driver)
+            if len(chosen) == 2:
+                return chosen[0], chosen[1]
+    for driver in drivers_list:
+        if driver not in chosen:
+            chosen.append(driver)
+            if len(chosen) == 2:
+                break
+    if len(chosen) == 2:
+        return chosen[0], chosen[1]
+    return (chosen[0], chosen[0]) if chosen else (None, None)
+
+
 def _driver_season_error(d1, d2, session):
     """Rechaza pilotos asignados explícitamente a otra temporada.
 
@@ -129,28 +170,32 @@ def _driver_season_error(d1, d2, session):
 
 
 def telemetry(request):
-    """Compara la telemetría real de dos pilotos en una sesión de la BD.
+    """Compara tiempos por vuelta reales de dos pilotos en una sesión de la BD.
 
     Si ya hay un PNG válido en caché se sirve en el mismo request; si no, se
-    lanza un trabajo en segundo plano y la plantilla sondea su estado. Así el
-    primer cálculo de FastF1 nunca bloquea la respuesta.
+    lanza un trabajo en segundo plano y la plantilla sondea su estado. El
+    servicio obtiene las vueltas desde ``fetch_lap_comparison`` (FastF1/Ergast),
+    sin F1TV ni live timing, y nunca bloquea la respuesta.
     """
     drivers_list = list(Driver.objects.all().order_by("name"))
     limit = _session_limit()
+    now = timezone.now()
+    # Igual que ``sync_drivers``: FastF1 solo tiene datos de sesiones ya
+    # disputadas. Filtrar por fecha aquí evita que el default (y el selector)
+    # apunte a una carrera futura y que el worker pierda tiempo en un 404.
     sessions_list = list(
         Session.objects.select_related("event")
-        .filter(event__season__year=season_year())
+        .filter(event__season__year=season_year(), date_time__lte=now)
         .order_by("-date_time")[:limit]
     )
     sessions_criterion = (
         f"Últimas {len(sessions_list)} sesiones de la temporada "
-        f"{season_year()} (más recientes primero)."
+        f"{season_year()} ya disputadas (más recientes primero)."
     )
-    # Por defecto, la última sesión de carrera; si no hay carreras, la última
-    # sesión disponible de cualquier tipo.
+    # Por defecto, la última carrera ya disputada. Si todavía no hubo ninguna,
+    # se muestra un estado vacío en vez de intentar generar telemetría.
     default_session = next(
-        (session for session in sessions_list if session.name == "Race"),
-        sessions_list[0] if sessions_list else None,
+        (session for session in sessions_list if session.name == "Race"), None
     )
 
     requested_d1 = request.GET.get("d1")
@@ -159,8 +204,7 @@ def telemetry(request):
         d1 = Driver.objects.filter(acronym=requested_d1).first()
         d2 = Driver.objects.filter(acronym=requested_d2).first()
     else:
-        d1 = drivers_list[0] if drivers_list else None
-        d2 = drivers_list[1] if len(drivers_list) > 1 else d1
+        d1, d2 = _default_driver_pair(drivers_list)
 
     session_id = request.GET.get("session")
     selected_session = default_session
@@ -175,10 +219,18 @@ def telemetry(request):
     source_label = ""
     job_key = ""
 
-    if not drivers_list or default_session is None:
+    if not drivers_list or not sessions_list:
         error = "No hay pilotos ni sesiones disponibles para comparar telemetría."
     elif session_id and selected_session is None:
-        error = "La sesión seleccionada no existe."
+        error = (
+            "La sesión seleccionada no existe. Solo se pueden comparar "
+            "sesiones ya disputadas."
+        )
+    elif selected_session is None:
+        error = (
+            f"Todavía no hay carreras disputadas en la temporada {season_year()} "
+            "para comparar tiempos por vuelta. Probá después de la próxima carrera."
+        )
     elif d1 is None or d2 is None:
         error = "Los pilotos seleccionados no existen."
     else:

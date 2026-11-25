@@ -130,3 +130,39 @@ class TelemetryJob(models.Model):
 
     def __str__(self):
         return f"TelemetryJob {self.key} ({self.status})"
+
+
+class DriverStanding(models.Model):
+    """Posición final de un piloto en el campeonato (datos de Ergast/Jolpica)."""
+
+    season_year = models.IntegerField()
+    position = models.IntegerField()
+    points = models.FloatField()
+    wins = models.IntegerField()
+    driver_code = models.CharField(max_length=10)
+    driver_name = models.CharField(max_length=200)
+    constructor_name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["position"]
+        unique_together = ("season_year", "driver_code")
+
+    def __str__(self):
+        return f"{self.position}. {self.driver_name} ({self.driver_code}) - {self.season_year}"
+
+
+class ConstructorStanding(models.Model):
+    """Posición final de un equipo en el campeonato (datos de Ergast/Jolpica)."""
+
+    season_year = models.IntegerField()
+    position = models.IntegerField()
+    points = models.FloatField()
+    wins = models.IntegerField()
+    constructor_name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["position"]
+        unique_together = ("season_year", "constructor_name")
+
+    def __str__(self):
+        return f"{self.position}. {self.constructor_name} - {self.season_year}"

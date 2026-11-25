@@ -4,12 +4,155 @@
 
 {% block content %}
 <div class="dashboard-grid">
-    <section class="glass-panel" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; text-align: center;">
-        <i class="fas fa-chart-line" style="font-size: 48px; color: var(--electric-blue); margin-bottom: 20px;"></i>
-        <h1 style="font-family: var(--font-heading); font-size: 32px;">ANÁLISIS AVANZADO</h1>
-        <p style="color: var(--text-muted); max-width: 600px; margin-top: 20px;">
-            El módulo de telemetría y AWS Insights para la temporada {{ season_year }} estará completamente operativo una vez que comiencen las sesiones oficiales de práctica. El sistema recolectará datos en vivo de FastF1 para generar comparaciones de velocidad, uso de acelerador y frenado.
-        </p>
+    <!-- Próximo GP: datos de la sesión Race, no del simple Event.date -->
+    <section class="glass-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
+            <h2>PRÓXIMO GRAN PREMIO · {{ season_year }}</h2>
+            <span class="accent-badge">
+                {% if countdown.status == "in_progress" %}EN CURSO
+                {% elif insights.next_gp.has_race %}FALTAN {{ insights.next_gp.days }} DÍA{{ insights.next_gp.days|pluralize }}
+                {% else %}SIN FECHA{% endif %}
+            </span>
+        </div>
+        {% if insights.next_gp.has_race %}
+        <div class="driver-stats">
+            <div class="stat-box">
+                <span class="stat-label">GRAN PREMIO</span>
+                <span class="stat-value">{{ insights.next_gp.name }}</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">SEDE</span>
+                <span class="stat-value">{{ insights.next_gp.location }}</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">FECHA</span>
+                <span class="stat-value">{{ insights.next_gp.date|date:"d M Y" }}</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">INICIO DE LA CARRERA</span>
+                <span class="stat-value">{{ insights.next_gp.starts_at|date:"d M H:i" }}</span>
+            </div>
+        </div>
+        <p><span class="stat-label">Días naturales hasta la carrera: {{ insights.next_gp.days }}. Horas en {{ countdown.timezone }}.</span></p>
+        {% else %}
+        <p><span class="stat-label">No hay una próxima carrera con hora de sesión Race cargada para {{ season_year }}.</span></p>
+        {% endif %}
+    </section>
+
+    <!-- Últimas carreras finalizadas, ordenadas por hora real de la sesión Race -->
+    <section class="glass-panel">
+        <div class="panel-header">
+            <h2>ÚLTIMAS CARRERAS</h2>
+            <span class="accent-badge">DATOS REALES</span>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th>R</th><th>FECHA</th><th>GRAN PREMIO</th><th>SEDE</th></tr>
+                </thead>
+                <tbody>
+                    {% for gp in insights.recent_gps %}
+                    <tr>
+                        <td>R{{ gp.round }}</td>
+                        <td>{{ gp.date|date:"d M Y" }}</td>
+                        <td>{{ gp.name }}</td>
+                        <td>{{ gp.location }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4">No hay carreras finalizadas cargadas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p><span class="stat-label">Se ordenan por la hora real de la sesión Race (últimas 5).</span></p>
+    </section>
+
+    <!-- Resumen de la temporada activa -->
+    <section class="glass-panel">
+        <div class="panel-header">
+            <h2>TEMPORADA {{ season_year }}</h2>
+            <span class="accent-badge">RESUMEN</span>
+        </div>
+        <div class="driver-stats">
+            <div class="stat-box"><span class="stat-label">SESIONES</span><span class="stat-value">{{ insights.season.sessions }}</span></div>
+            <div class="stat-box"><span class="stat-label">CON FECHA PASADA</span><span class="stat-value">{{ insights.season.past_sessions }}</span></div>
+            <div class="stat-box"><span class="stat-label">FUTURAS</span><span class="stat-value">{{ insights.season.future_sessions }}</span></div>
+            <div class="stat-box"><span class="stat-label">PILOTOS</span><span class="stat-value">{{ insights.season.drivers }}</span></div>
+            <div class="stat-box"><span class="stat-label">EQUIPOS</span><span class="stat-value">{{ insights.season.team_count }}</span></div>
+        </div>
+        <p><span class="stat-label">Equipos de la temporada: {% for team in insights.season.teams %}{{ team }}{% if not forloop.last %} · {% endif %}{% empty %}sin datos{% endfor %}.</span></p>
+        <p><span class="stat-label"><a href="{% url 'drivers' %}">VER PILOTOS →</a> · <a href="{% url 'teams' %}">VER EQUIPOS →</a></span></p>
+    </section>
+
+    <!-- Estado real de la caché de telemetría -->
+    <section class="glass-panel">
+        <div class="panel-header">
+            <h2>TELEMETRÍA</h2>
+            <span class="accent-badge">{% if insights.telemetry.available %}CACHÉ ACTIVA{% else %}SIN CACHÉ{% endif %}</span>
+        </div>
+        {% if insights.telemetry.available %}
+        <p><span class="stat-label">{{ insights.telemetry.comparisons }} comparación{{ insights.telemetry.comparisons|pluralize }} guardada{{ insights.telemetry.comparisons|pluralize }} en {{ insights.telemetry.sessions }} sesión{{ insights.telemetry.sessions|pluralize }}.</span></p>
+        <p><span class="stat-label">Última generación: {{ insights.telemetry.last_created_at|date:"d M Y H:i" }}.</span></p>
+        {% else %}
+        <p><span class="stat-label">Todavía no hay gráficos de telemetría guardados en la caché.</span></p>
+        {% endif %}
+        <p><span class="stat-label">Compará tiempos por vuelta en una sesión real, sin F1TV: <a href="{% url 'telemetry' %}">ABRIR TELEMETRÍA →</a></span></p>
+    </section>
+
+    <!-- Clasificación real persistida (sync_standings); nunca números estimados -->
+    <section class="glass-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
+            <h2>CLASIFICACIÓN OFICIAL {{ standings_year }}</h2>
+            <span class="accent-badge">{% if driver_standings or constructor_standings %}DATOS REALES{% else %}SIN DATOS{% endif %}</span>
+        </div>
+        {% if driver_standings or constructor_standings %}
+            {% if driver_standings %}
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>POS</th><th>PILOTO</th><th>EQUIPO</th><th>PUNTOS</th><th>VICTORIAS</th></tr></thead>
+                    <tbody>
+                        {% for row in driver_standings %}
+                        <tr>
+                            <td>{{ row.position }}</td>
+                            <td>{{ row.driver_name }} ({{ row.driver_code }})</td>
+                            <td>{{ row.constructor_name }}</td>
+                            <td>{{ row.points }}</td>
+                            <td>{{ row.wins }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            {% if constructor_standings %}
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>POS</th><th>CONSTRUCTOR</th><th>PUNTOS</th><th>VICTORIAS</th></tr></thead>
+                    <tbody>
+                        {% for row in constructor_standings %}
+                        <tr>
+                            <td>{{ row.position }}</td>
+                            <td>{{ row.constructor_name }}</td>
+                            <td>{{ row.points }}</td>
+                            <td>{{ row.wins }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+            <p><span class="stat-label">Fuente: {{ standings_source }}. Los datos se persisten con <code>sync_standings</code>; esta página no realiza consultas externas.</span></p>
+        {% else %}
+            <p><span class="stat-label">Sin clasificación oficial cargada para {{ standings_year }}: no hay puntos ni posiciones en la base de datos y esta página no muestra números estimados. Ejecutá <code>sync_standings</code> ({{ standings_source }}).</span></p>
+            {% if standings_other_years %}
+            <p><span class="stat-label">Solo hay clasificación guardada de {{ standings_other_years|join:", " }}; no se muestra como si fuera de {{ standings_year }}.</span></p>
+            {% endif %}
+        {% endif %}
     </section>
 </div>
+{% if driver_standings or constructor_standings %}
+<p><span class="stat-label">Datos locales: calendario, sesiones, pilotos, clasificación y caché de gráficos · temporada {{ season_year }}. Clasificación: {{ standings_source }}.</span></p>
+{% else %}
+<p><span class="stat-label">Datos locales: calendario, sesiones, pilotos y caché de telemetría · temporada {{ season_year }}.</span></p>
+{% endif %}
 {% endblock %}

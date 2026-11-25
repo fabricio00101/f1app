@@ -1,13 +1,17 @@
-"""Tests del servicio de telemetría: sin red y con MEDIA_ROOT temporal."""
+"""Tests del servicio de TIEMPOS POR VUELTA: sin red y con MEDIA_ROOT temporal.
+
+``fetch_lap_comparison`` se mockea: ningún test consulta Ergast/Jolpica ni
+F1TV. Se verifican el gráfico, la caché, el TTL y la escritura atómica.
+"""
 
 import os
 import tempfile
 from datetime import timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import matplotlib
 matplotlib.use("Agg")  # backend headless: los tests no abren ventanas
-import pandas as pd
+import matplotlib.axes
 from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -23,31 +27,25 @@ from f1hub.services import (
 
 from .helpers import make_driver, make_event, make_season, make_session
 
-
-class FakeTelemetry:
-    """Telemetría mínima con la interfaz que usa el servicio."""
-
-    def __init__(self):
-        self.data = {
-            "Distance": pd.Series([0.0, 100.0, 200.0]),
-            "Speed": pd.Series([300.0, 310.0, 305.0]),
-        }
-
-    def add_distance(self):
-        return self
-
-    def __getitem__(self, key):
-        return self.data[key]
+# Fila tal como la devuelve el contrato de ergast_service.fetch_lap_comparison.
+LAP_ROWS = [
+    {"lap": 1, "code1_seconds": 95.2, "code2_seconds": 95.8},
+    {"lap": 3, "code1_seconds": 91.7, "code2_seconds": 91.5},
+    {"lap": 2, "code1_seconds": 92.1, "code2_seconds": 92.4},
+]
 
 
-class TelemetryServiceTests(TestCase):
+class LapTimesServiceTests(TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
         self.media_root = self.tmpdir.name
         self.enterContext(self.settings(MEDIA_ROOT=self.media_root))
 
-        self.fastf1_mock = self.enterContext(patch("f1hub.services.fastf1"))
+        self.fetch = self.enterContext(
+            patch("f1hub.services.fetch_lap_comparison")
+        )
+        self.fetch.return_value = [dict(row) for row in LAP_ROWS]
 
         self.season = make_season(2026)
         self.event = make_event(self.season, round_number=1, name="Gran Premio de Prueba")
@@ -55,21 +53,6 @@ class TelemetryServiceTests(TestCase):
 
         self.ver = make_driver("VER", "Max Verstappen", "Red Bull", "NED")
         self.col = make_driver("COL", "Franco Colapinto", "Alpine", "ARG")
-        self.ant = make_driver("ANT", "Piloto 2026", "Equipo 2026", "ARG")
-
-        self._stub_fastf1()
-
-    def _stub_fastf1(self):
-        """Hace que pick_driver devuelva vueltas/telemetría falsas por sigla."""
-        laps_by_code = {}
-        for code in ("VER", "COL", "ANT"):
-            laps = MagicMock()
-            laps.empty = False
-            laps.pick_fastest.return_value.get_telemetry.return_value = FakeTelemetry()
-            laps_by_code[code] = laps
-        self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect = (
-            lambda code: laps_by_code[code]
-        )
 
     def _tmp_files(self):
         telemetry_dir = os.path.join(self.media_root, "telemetry")
@@ -91,8 +74,10 @@ class TelemetryServiceTests(TestCase):
         self.assertEqual(TelemetryCache.objects.count(), 1)
         cached = TelemetryCache.objects.get()
         self.assertEqual((cached.driver1, cached.driver2), (self.col, self.ver))
-        # Solo se generó una vez: la segunda llamada reutilizó la caché.
-        self.assertEqual(self.fastf1_mock.get_session.call_count, 1)
+        # Una sola consulta de datos: la segunda llamada reutilizó la caché.
+        self.assertEqual(self.fetch.call_count, 1)
+        # La pareja canónica fija el orden de code1/code2 en el gráfico.
+        self.fetch.assert_called_once_with(2026, 1, "COL", "VER")
 
     # (b) La clave incluye el año de la temporada.
     def test_cache_key_includes_season_year(self):
@@ -117,20 +102,23 @@ class TelemetryServiceTests(TestCase):
             {self.session.pk, session_2025.pk},
         )
 
-    # (c) Un fallo de FastF1 se propaga y no deja fila inválida.
-    def test_fastf1_failure_propagates_without_empty_cache_row(self):
+    # (c) Un fallo de la fuente se convierte en error de dominio sin fila inválida.
+    def test_fetch_failure_raises_domain_error_without_empty_cache_row(self):
         TelemetryCache.objects.create(
             session=self.session,
             driver1=self.col,
             driver2=self.ver,
             file_path="",
         )
-        self.fastf1_mock.get_session.side_effect = RuntimeError("fallo de red simulado")
+        self.fetch.side_effect = RuntimeError("detalle tecnico secreto")
 
-        with self.assertLogs("f1hub.services", level="ERROR"):
-            with self.assertRaisesRegex(RuntimeError, "fallo de red simulado"):
+        with self.assertLogs("f1hub.services", level="ERROR") as logs:
+            with self.assertRaises(TelemetryUnavailable) as error:
                 get_or_generate_telemetry_plot(self.session, self.ver, self.col)
 
+        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertNotIn("detalle tecnico secreto", str(error.exception))
+        self.assertIn("detalle tecnico secreto", "\n".join(logs.output))
         self.assertEqual(TelemetryCache.objects.count(), 0)
 
     # (d) El PNG queda en la ruta definitiva y no quedan temporales.
@@ -153,15 +141,74 @@ class TelemetryServiceTests(TestCase):
         self.assertEqual(TelemetryCache.objects.count(), 0)
         self.assertFalse([name for name in self._tmp_files() if name.startswith("tmp_tel_")])
 
-    # Colores: siglas nuevas de 2026 no rompen si fastf1 no las conoce.
-    def test_unknown_driver_acronym_uses_fallback_color(self):
-        self.fastf1_mock.plotting.driver_color.side_effect = KeyError("ANT")
-        self.fastf1_mock.plotting.get_driver_color.side_effect = KeyError("ANT")
+    # (e) Sin vueltas: error de dominio claro y sin caché.
+    def test_empty_lap_times_raise_friendly_domain_error(self):
+        self.fetch.return_value = []
 
-        path = get_or_generate_telemetry_plot(self.session, self.ant, self.ver)
+        with self.assertLogs("f1hub.services", level="ERROR"):
+            with self.assertRaises(TelemetryUnavailable) as error:
+                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertIn("tiempos por vuelta", str(error.exception).lower())
+        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
+        self.assertEqual(TelemetryCache.objects.count(), 0)
+        self.assertEqual(self._tmp_files(), [])
+
+    def test_rows_without_lap_or_seconds_raise_domain_error(self):
+        self.fetch.return_value = [{"lap": 1, "code1_seconds": None}]
+
+        with self.assertRaises(TelemetryUnavailable):
+            get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.assertEqual(TelemetryCache.objects.count(), 0)
+
+    # (f) Se usa el round_number del evento y el año de su temporada.
+    def test_uses_event_round_number_and_season_year(self):
+        self.event.round_number = 22
+        self.event.save(update_fields=["round_number"])
+
+        get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+
+        self.fetch.assert_called_once_with(2026, 22, "COL", "VER")
+
+    # (g) Eje X = vuelta, eje Y = segundos, dos líneas y título con GP/ronda/pilotos.
+    def test_plot_uses_laps_and_seconds_with_descriptive_title(self):
+        plotted = []
+        titles = []
+        real_plot = matplotlib.axes.Axes.plot
+        real_set_title = matplotlib.axes.Axes.set_title
+
+        def record_plot(ax, *args, **kwargs):
+            plotted.append(args)
+            return real_plot(ax, *args, **kwargs)
+
+        def record_title(ax, label, *args, **kwargs):
+            titles.append(label)
+            return real_set_title(ax, label, *args, **kwargs)
+
+        with patch.object(matplotlib.axes.Axes, "plot", record_plot), patch.object(
+            matplotlib.axes.Axes, "set_title", record_title
+        ):
+            path = get_or_generate_telemetry_plot(self.session, self.ver, self.col)
 
         self.assertTrue(os.path.isfile(os.path.join(self.media_root, path)))
-        self.assertEqual(TelemetryCache.objects.count(), 1)
+        self.assertEqual(len(plotted), 2)
+        self.assertEqual(list(plotted[0][0]), [1, 2, 3])
+        self.assertEqual(list(plotted[0][1]), [95.2, 92.1, 91.7])
+        self.assertEqual(list(plotted[1][1]), [95.8, 92.4, 91.5])
+        self.assertEqual(len(titles), 1)
+        title = titles[0]
+        self.assertIn("TIEMPOS POR VUELTA", title)
+        self.assertIn("Gran Premio de Prueba", title)
+        self.assertIn("R1", title)
+        self.assertIn("COL", title)
+        self.assertIn("VER", title)
+
+    # Nunca se llama a get_session().load() ni a live timing.
+    def test_no_fastf1_session_load_in_this_path(self):
+        self.assertFalse(hasattr(services, "fastf1"))
+        get_or_generate_telemetry_plot(self.session, self.ver, self.col)
+        self.assertEqual(self.fetch.call_count, 1)
 
     # TTL: una entrada vencida se descarta (archivo incluido) y se regenera.
     def test_expired_cache_is_removed_and_regenerated(self):
@@ -180,7 +227,7 @@ class TelemetryServiceTests(TestCase):
 
         self.assertEqual(new_path, path)
         remove.assert_any_call(path)
-        self.assertEqual(self.fastf1_mock.get_session.call_count, 2)
+        self.assertEqual(self.fetch.call_count, 2)
         self.assertEqual(TelemetryCache.objects.count(), 1)
         with open(absolute, "rb") as regenerated:
             self.assertNotEqual(regenerated.read(), b"contenido anterior")
@@ -190,7 +237,7 @@ class TelemetryServiceTests(TestCase):
         get_or_generate_telemetry_plot(self.session, self.ver, self.col)
         get_or_generate_telemetry_plot(self.session, self.ver, self.col)
 
-        self.assertEqual(self.fastf1_mock.get_session.call_count, 2)
+        self.assertEqual(self.fetch.call_count, 2)
         self.assertEqual(TelemetryCache.objects.count(), 1)
 
     def test_missing_file_is_cleaned_and_regenerated(self):
@@ -200,79 +247,6 @@ class TelemetryServiceTests(TestCase):
         new_path = get_or_generate_telemetry_plot(self.session, self.ver, self.col)
 
         self.assertEqual(new_path, path)
-        self.assertEqual(self.fastf1_mock.get_session.call_count, 2)
+        self.assertEqual(self.fetch.call_count, 2)
         self.assertEqual(TelemetryCache.objects.count(), 1)
         self.assertTrue(os.path.isfile(os.path.join(self.media_root, new_path)))
-
-    # La sesión se carga antes de tocar ``laps`` (DataNotLoadedError en 3.9.2).
-    def test_session_is_loaded_before_laps_are_accessed(self):
-        session_mock = self.fastf1_mock.get_session.return_value
-        ordered = MagicMock()
-        ordered.attach_mock(session_mock.load, "load")
-        ordered.attach_mock(session_mock.laps.pick_driver, "pick_driver")
-
-        path = get_or_generate_telemetry_plot(self.session, self.ver, self.col)
-
-        self.assertTrue(os.path.isfile(os.path.join(self.media_root, path)))
-        session_mock.load.assert_called_once_with(
-            laps=True, telemetry=True, weather=False, messages=False
-        )
-        names = [name for name, _, _ in ordered.mock_calls]
-        self.assertEqual(names[0], "load")
-        self.assertLess(names.index("load"), names.index("pick_driver"))
-
-    # Las deprecaciones de fastf1 3.9.2 quedan fuera del código.
-    def test_uses_configure_and_setup_mpl_without_deprecated_arguments(self):
-        get_or_generate_telemetry_plot(self.session, self.ver, self.col)
-
-        cache_dir = os.path.join(str(settings.BASE_DIR), "fastf1_cache")
-        self.fastf1_mock.Cache.configure.assert_called_once_with(cache_dir=cache_dir)
-        self.fastf1_mock.Cache.enable_cache.assert_not_called()
-        self.fastf1_mock.plotting.setup_mpl.assert_called_once_with()
-
-    def test_failed_session_load_raises_friendly_domain_error(self):
-        self.fastf1_mock.get_session.return_value.load.side_effect = RuntimeError(
-            "detalle tecnico de la carga"
-        )
-
-        with self.assertLogs("f1hub.services", level="ERROR"):
-            with self.assertRaises(TelemetryUnavailable) as error:
-                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
-
-        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
-        self.assertNotIn("detalle tecnico", str(error.exception))
-        self.assertEqual(TelemetryCache.objects.count(), 0)
-        self.assertEqual(self._tmp_files(), [])
-
-    def test_missing_laps_raise_friendly_domain_error(self):
-        empty_laps = MagicMock()
-        empty_laps.empty = True
-        original = self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect
-
-        def pick_driver(code):
-            return empty_laps if code == "VER" else original(code)
-
-        self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect = pick_driver
-
-        with self.assertLogs("f1hub.services", level="ERROR"):
-            with self.assertRaises(TelemetryUnavailable) as error:
-                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
-
-        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
-        self.assertEqual(TelemetryCache.objects.count(), 0)
-
-    def test_empty_telemetry_raises_friendly_domain_error(self):
-        empty_telemetry = MagicMock()
-        empty_telemetry.empty = True
-        empty_telemetry.add_distance.return_value = empty_telemetry
-        ver_laps = self.fastf1_mock.get_session.return_value.laps.pick_driver.side_effect(
-            "VER"
-        )
-        ver_laps.pick_fastest.return_value.get_telemetry.return_value = empty_telemetry
-
-        with self.assertLogs("f1hub.services", level="ERROR"):
-            with self.assertRaises(TelemetryUnavailable) as error:
-                get_or_generate_telemetry_plot(self.session, self.ver, self.col)
-
-        self.assertEqual(str(error.exception), TELEMETRY_UNAVAILABLE_MESSAGE)
-        self.assertEqual(TelemetryCache.objects.count(), 0)

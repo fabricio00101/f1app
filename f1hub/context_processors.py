@@ -10,9 +10,16 @@ La carrera se elige por el instante real de su sesión ``Race``:
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.utils import DatabaseError
 from django.utils import timezone
 
+from . import insights as insights_module
 from .models import Event, Session
+
+# Etiqueta única para todas las vistas: los standings se sincronizan desde
+# FastF1 (Ergast/Jolpica); las plantillas nunca consultan F1TV ni hacen red.
+STANDINGS_SOURCE = "FastF1 (Ergast/Jolpica), sin F1TV"
+
 
 def season_year():
     """Temporada activa, configurable desde settings (default: 2026)."""
@@ -69,9 +76,65 @@ def get_next_race(now=None):
     return STATE_FINISHED, None, None
 
 
+def _standings_models():
+    """Importación diferida de los modelos de clasificación.
+
+    La capa de datos (``ergast_service`` + modelos de standings) se integra en
+    paralelo; mientras no esté presente las páginas siguen funcionando con el
+    estado vacío de siempre, sin consultar la red.
+    """
+    try:
+        from .models import ConstructorStanding, DriverStanding
+    except ImportError:
+        return None, None
+    return DriverStanding, ConstructorStanding
+
+
+def standings_context(year=None):
+    """Clasificaciones persistidas para ``year``; solo consulta la BD.
+
+    No se hace ninguna petición externa: el comando ``sync_standings`` es el
+    único que puede escribir estas tablas. Si solo hay datos de otra temporada
+    se exponen los años disponibles para que la UI lo diga con honestidad, sin
+    presentar cifras ajenas como si fueran de la temporada activa.
+    """
+    year = season_year() if year is None else year
+    result = {
+        "driver_standings": [],
+        "constructor_standings": [],
+        "standings_year": year,
+        "standings_other_years": [],
+    }
+    driver_model, constructor_model = _standings_models()
+    if driver_model is None or constructor_model is None:
+        return result
+
+    try:
+        result["driver_standings"] = list(
+            driver_model.objects.filter(season_year=year).order_by("position")
+        )
+        result["constructor_standings"] = list(
+            constructor_model.objects.filter(season_year=year).order_by("position")
+        )
+        result["standings_other_years"] = sorted(
+            set(driver_model.objects.values_list("season_year", flat=True))
+            | set(constructor_model.objects.values_list("season_year", flat=True))
+        )
+    except DatabaseError:
+        # Tabla todavía no migrada durante la integración: estado vacío.
+        return {
+            "driver_standings": [],
+            "constructor_standings": [],
+            "standings_year": year,
+            "standings_other_years": [],
+        }
+    return result
+
+
 def race_context(request):
     """Inyecta calendario, fecha actual y estado del contador en todas las vistas."""
     now = timezone.now()
+    year = season_year()
     state, event, race = get_next_race(now)
     starts_at = race.date_time if race else None
 
@@ -90,9 +153,17 @@ def race_context(request):
     }
 
     return {
-        "season_year": season_year(),
-        "calendar_events": Event.objects.filter(season__year=season_year()).order_by("date"),
+        "season_year": year,
+        "calendar_events": Event.objects.filter(season__year=year).order_by("date"),
         "today": timezone.localdate(),
         "next_event": event,
         "countdown": countdown,
+        # La página de análisis reutiliza los datos reales ya calculados aquí
+        # (temporada y carrera del contador) para no repetir consultas.
+        "insights": insights_module.build_insights(
+            now=now, race=race, year=year
+        ),
+        # Clasificación real ya guardada en la BD (sin red en el request).
+        "standings_source": STANDINGS_SOURCE,
+        **standings_context(year),
     }

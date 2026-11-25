@@ -27,10 +27,24 @@
                     </div>
                     <div class="stat-box">
                         <span class="stat-label">POSICIÓN OFICIAL</span>
-                        <span class="stat-value">—</span>
+                        <span class="stat-value">{% if colapinto_standing %}{{ colapinto_standing.position }}{% else %}—{% endif %}</span>
                     </div>
+                    {% if colapinto_standing %}
+                    <div class="stat-box">
+                        <span class="stat-label">PUNTOS</span>
+                        <span class="stat-value">{{ colapinto_standing.points }}</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-label">VICTORIAS</span>
+                        <span class="stat-value">{{ colapinto_standing.wins }}</span>
+                    </div>
+                    {% endif %}
                 </div>
-                <p><span class="stat-label">Posición y puntos: sin datos oficiales cargados.</span></p>
+                {% if colapinto_standing %}
+                <p><span class="stat-label">Clasificación {{ standings_year }}: {{ colapinto_standing.constructor_name }} · {{ colapinto_standing.points }} puntos · {{ colapinto_standing.wins }} victorias. Fuente: {{ standings_source }}.</span></p>
+                {% else %}
+                <p><span class="stat-label">Posición y puntos: sin datos oficiales cargados. Ejecutá <code>sync_standings</code> para traer la clasificación desde FastF1 (Ergast/Jolpica), sin F1TV.</span></p>
+                {% endif %}
                 {% else %}
                 <h1>SIN DATOS</h1>
                 <p class="team-name">Piloto no disponible</p>
@@ -45,12 +59,66 @@
         </div>
     </section>
 
-    <!-- Teams / constructors (sin standings oficiales) -->
+    <!-- Clasificación real de pilotos (solo si hay filas persistidas) -->
     <section class="constructors-standings glass-panel">
         <div class="panel-header">
-            <h2>CONSTRUCTORES {{ season_year }}</h2>
-            <span class="accent-badge">SIN CLASIFICACIÓN</span>
+            <h2>CLASIFICACIÓN DE PILOTOS {{ standings_year }}</h2>
+            <span class="accent-badge">{% if driver_standings %}DATOS REALES{% else %}SIN CLASIFICACIÓN{% endif %}</span>
         </div>
+        {% if driver_standings %}
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th>POS</th><th>PILOTO</th><th>EQUIPO</th><th>PUNTOS</th><th>VICTORIAS</th></tr>
+                </thead>
+                <tbody>
+                    {% for row in driver_standings %}
+                    <tr>
+                        <td>{{ row.position }}</td>
+                        <td>{{ row.driver_name }} ({{ row.driver_code }})</td>
+                        <td>{{ row.constructor_name }}</td>
+                        <td>{{ row.points }}</td>
+                        <td>{{ row.wins }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p><span class="stat-label">Fuente: {{ standings_source }}. Datos persistidos por <code>sync_standings</code>; esta vista no consulta la red.</span></p>
+        {% else %}
+        <p><span class="stat-label">Sin clasificación oficial cargada para {{ standings_year }}. Ejecutá <code>sync_standings</code> para publicar posiciones, puntos y victorias.</span></p>
+        {% if standings_other_years %}
+        <p><span class="stat-label">Solo hay clasificación guardada de {{ standings_other_years|join:", " }}; no se muestra como si fuera de {{ standings_year }}.</span></p>
+        {% endif %}
+        {% endif %}
+    </section>
+
+    <!-- Constructores: tabla real si hay standings; si no, equipos derivados de pilotos -->
+    <section class="constructors-standings glass-panel">
+        <div class="panel-header">
+            <h2>CONSTRUCTORES {{ standings_year }}</h2>
+            <span class="accent-badge">{% if constructor_standings %}DATOS REALES{% else %}SIN CLASIFICACIÓN{% endif %}</span>
+        </div>
+        {% if constructor_standings %}
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th>POS</th><th>EQUIPO</th><th>PUNTOS</th><th>VICTORIAS</th></tr>
+                </thead>
+                <tbody>
+                    {% for row in constructor_standings %}
+                    <tr>
+                        <td>{{ row.position }}</td>
+                        <td>{{ row.constructor_name }}</td>
+                        <td>{{ row.points }}</td>
+                        <td>{{ row.wins }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p><span class="stat-label">Fuente: {{ standings_source }}.</span></p>
+        {% else %}
         <div class="table-container">
             <table>
                 <thead>
@@ -71,20 +139,25 @@
                 </tbody>
             </table>
         </div>
-        <p><span class="stat-label">Sin clasificación oficial cargada: se listan equipos, sin puntos ni posiciones.</span></p>
+        <p><span class="stat-label">Sin clasificación oficial cargada: se listan equipos, sin puntos ni posiciones. Ejecutá <code>sync_standings</code> para traer los datos reales ({{ standings_source }}).</span></p>
+        {% endif %}
     </section>
 
-    <!-- Telemetry Module: acceso a la comparación con datos reales de sesión -->
+    <!-- Tiempos por vuelta: comparación real desde Ergast, sin F1TV -->
     <section class="telemetry-module glass-panel">
         <div class="panel-header">
-            <h2>ANÁLISIS DE TELEMETRÍA</h2>
-            <span class="accent-badge">DATOS REALES</span>
+            <h2>TIEMPOS POR VUELTA</h2>
+            <span class="accent-badge">SIN F1TV</span>
         </div>
         <div class="chart-container" style="display: flex; align-items: center; justify-content: center;">
             <span class="stat-label">Sin telemetría disponible.</span>
         </div>
-        <p><span class="stat-label">Compará la vuelta más rápida de dos pilotos en una sesión real: <a href="{% url 'telemetry' %}">VER TELEMETRÍA →</a></span></p>
+        <p><span class="stat-label">Compará los tiempos por vuelta de dos pilotos en una sesión real: <a href="{% url 'telemetry' %}">VER TELEMETRÍA →</a></span></p>
     </section>
 </div>
+{% if driver_standings or constructor_standings %}
+<p><span class="stat-label">Datos de calendario, pilotos y clasificación: FastF1 · temporada {{ season_year }}. Clasificación: {{ standings_source }}.</span></p>
+{% else %}
 <p><span class="stat-label">Datos de calendario y pilotos: FastF1 · temporada {{ season_year }}. Sin clasificación oficial cargada.</span></p>
+{% endif %}
 {% endblock %}

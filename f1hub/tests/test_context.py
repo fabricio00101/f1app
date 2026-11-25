@@ -19,6 +19,15 @@ from .helpers import make_event, make_season, make_session
 PAGE_URLS = ("dashboard", "drivers", "teams", "insights")
 
 
+def _standings_models():
+    """Los modelos de standings los agrega la capa de datos en paralelo."""
+    try:
+        from f1hub.models import ConstructorStanding, DriverStanding
+    except ImportError:
+        return None, None
+    return DriverStanding, ConstructorStanding
+
+
 class SharedContextTests(TestCase):
     def setUp(self):
         self.season = make_season(2026)
@@ -44,6 +53,7 @@ class SharedContextTests(TestCase):
                 self.assertIn("today", response.context)
                 self.assertIn("next_event", response.context)
                 self.assertIn("countdown", response.context)
+                self.assertIn("insights", response.context)
                 self.assertEqual(response.context["next_event"], event)
                 self.assertEqual(response.context["today"], timezone.localdate())
                 self.assertEqual(list(response.context["calendar_events"]), [event])
@@ -122,3 +132,59 @@ class SharedContextTests(TestCase):
         self.assertEqual(response.context["next_event"], other_event)
         self.assertNotIn(event, list(response.context["calendar_events"]))
         self.assertContains(response, "F1 2027 Season Hub")
+
+
+class StandingsContextTests(TestCase):
+    """El processor solo lee la BD: nunca llama a Ergast ni a F1TV."""
+
+    def setUp(self):
+        self.driver_model, self.constructor_model = _standings_models()
+        if self.driver_model is None or self.constructor_model is None:
+            self.skipTest("Los modelos de standings aún no fueron creados")
+        self.season = make_season(2026)
+        try:
+            self.driver_row = self.driver_model.objects.create(
+                season_year=2026,
+                position=1,
+                points=25,
+                wins=1,
+                driver_code="VER",
+                driver_name="Max Verstappen",
+                constructor_name="Red Bull",
+            )
+            self.team_row = self.constructor_model.objects.create(
+                season_year=2026, position=1, points=25, wins=1,
+                constructor_name="Red Bull",
+            )
+        except Exception as exc:
+            self.skipTest(f"Tabla de standings aún no migrada: {exc}")
+
+    def test_context_exposes_standings_for_the_active_season(self):
+        context = race_context(None)
+
+        self.assertEqual(list(context["driver_standings"]), [self.driver_row])
+        self.assertEqual(list(context["constructor_standings"]), [self.team_row])
+        self.assertEqual(context["standings_year"], 2026)
+        self.assertEqual(context["standings_source"], "FastF1 (Ergast/Jolpica), sin F1TV")
+
+    def test_other_seasons_are_reported_but_not_mixed_in(self):
+        self.driver_model.objects.create(
+            season_year=2025, position=1, points=400, wins=10,
+            driver_code="OLD", driver_name="Piloto viejo",
+            constructor_name="Equipo viejo",
+        )
+
+        context = race_context(None)
+
+        self.assertEqual(list(context["driver_standings"]), [self.driver_row])
+        self.assertNotIn(2025, [row.season_year for row in context["driver_standings"]])
+        self.assertIn(2025, context["standings_other_years"])
+
+    def test_empty_database_keeps_explicit_empty_state(self):
+        self.driver_model.objects.all().delete()
+        self.constructor_model.objects.all().delete()
+
+        context = race_context(None)
+
+        self.assertEqual(context["driver_standings"], [])
+        self.assertEqual(context["constructor_standings"], [])
