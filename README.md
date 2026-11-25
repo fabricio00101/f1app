@@ -36,15 +36,41 @@ git clone https://github.com/fabricio00101/f1app.git
 cd f1app
 
 # 2. Crear y activar el entorno virtual
-python -m venv venv
+python -m venv .venv
 # En Windows:
-.\venv\Scripts\activate
+.\.venv\Scripts\activate
 # En Linux/Mac:
-source venv/bin/activate
+source .venv/bin/activate
 
 # 3. Instalar las dependencias
 pip install django fastf1 matplotlib pandas
 ```
+
+## Configuración
+
+La configuración sensible se lee de variables de entorno o de un archivo `.env` local. **Nunca subas el `.env`**: sólo `.env.example` está versionado.
+
+```bash
+# 1. Copiar la plantilla
+copy .env.example .env          # Windows
+cp .env.example .env            # Linux/Mac
+
+# 2. Generar un secret y pegarlo en DJANGO_SECRET_KEY de .env
+.\.venv\Scripts\python.exe -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+# Linux/Mac: .venv/bin/python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+
+# 3. Activar el entorno virtual
+.\.venv\Scripts\activate        # Windows
+source .venv/bin/activate       # Linux/Mac
+
+# 4. Verificar
+python manage.py check
+python manage.py test
+```
+
+Para desarrollo local, poné `DJANGO_DEBUG=1` en `.env`: así no hace falta un secret permanente (se genera uno temporal y las sesiones se invalidan al reiniciar) ni configurar `DJANGO_ALLOWED_HOSTS` (se agregan `localhost`, `127.0.0.1` y `[::1]`). **`DJANGO_DEBUG=1` es sólo para desarrollo**: en producción debe quedar en `0`, con un `DJANGO_SECRET_KEY` real y `DJANGO_ALLOWED_HOSTS` con los dominios correspondientes. Sin secret y con `DEBUG=False`, el arranque falla con un error explícito en lugar de usar una clave insegura.
+
+`config/urls.py` sirve `static/` y `media/` únicamente cuando `DEBUG=True`. En producción esos archivos debe servirlos el servidor web (`python manage.py collectstatic` para los estáticos).
 
 ## Uso de la Base de Datos y Comandos de Sincronización
 

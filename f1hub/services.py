@@ -118,18 +118,23 @@ def _remove_plot_file(file_path):
         logger.warning("No se pudo borrar el PNG de telemetría anterior: %s", absolute)
 
 
-def _resolve_driver_color(acronym, season, index=0):
+def _resolve_driver_color(acronym, season, index=0, f1_session=None):
     """Color del piloto con la API nueva, la legacy o la paleta fija.
 
-    fastf1 3.5.3 expone ``plotting.driver_color`` ( eliminada en 3.6, donde se
-    llama ``get_driver_color`` ). Probamos ambas; cualquier ``KeyError`` /
-    ``TypeError`` con siglas nuevas cae a la paleta fija, sin romper el gráfico.
+    En fastf1 3.9.2 la firma es ``get_driver_color(identifier, session)`` y
+    recibe el objeto ``Session`` ya cargado (se pasa como ``f1_session``).
+    Las versiones 3.6-3.8 usaban el año en su lugar y 3.5.3 exportaba
+    ``driver_color``. Se prueban todas; cualquier ``KeyError`` / ``TypeError``
+    con siglas nuevas (p. ej. ANT en 2026) cae a la paleta fija sin romper el
+    gráfico. ``f1_session`` es opcional para mantener la API del shim en tests.
     """
     candidates = []
     getter = getattr(fastf1.plotting, "get_driver_color", None)
     if callable(getter):
-        candidates.append(lambda: getter(acronym, season))  # API >= 3.6
-        candidates.append(lambda: getter(acronym))           # API intermedia
+        if f1_session is not None:
+            candidates.append(lambda: getter(acronym, f1_session))  # API >= 3.9
+        candidates.append(lambda: getter(acronym, season))          # API 3.6-3.8
+        candidates.append(lambda: getter(acronym))                  # API intermedia
     legacy = getattr(fastf1.plotting, "driver_color", None)
     if callable(legacy):
         candidates.append(lambda: legacy(acronym))           # API <= 3.5.3
@@ -177,8 +182,8 @@ def _generate_plot(session_obj, first, second, key):
     tel_second = laps_second.pick_fastest().get_telemetry().add_distance()
 
     season = session_obj.event.season.year
-    color_first = _resolve_driver_color(first.acronym, season, 0)
-    color_second = _resolve_driver_color(second.acronym, season, 1)
+    color_first = _resolve_driver_color(first.acronym, season, 0, f1_session)
+    color_second = _resolve_driver_color(second.acronym, season, 1, f1_session)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     tmp_path = None

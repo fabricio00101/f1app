@@ -10,22 +10,76 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+def _load_env_file(path):
+    """Carga un .env simple (KEY=VALUE) sin dependencias externas.
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-(x7owomx8)2k2ex7c+(io0g7-1w)x)wi70&d%4ppbp49_fg8*@'
+    Los valores ya presentes en el entorno del proceso tienen prioridad sobre
+    los del archivo. Se ignoran comentarios, líneas vacías y líneas sin '='.
+    """
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+_load_env_file(BASE_DIR / ".env")
+
+
+def _env_bool(name, default=False):
+    """Bool de entorno fail-safe: cualquier valor no reconocido es False."""
+    return os.environ.get(name, "1" if default else "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+# Seguridad: toda la configuración sensible viene del entorno (o del .env
+# local). DEBUG=False por defecto; en desarrollo se activa con DJANGO_DEBUG=1.
+# Ver https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+DEBUG = _env_bool("DJANGO_DEBUG")
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    if DEBUG:
+        # Solo desarrollo: clave efímera para no romper el arranque local.
+        # Las sesiones se invalidan al reiniciar el proceso.
+        from django.core.management.utils import get_random_secret_key
+
+        SECRET_KEY = get_random_secret_key()
+    else:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY no está definida. Generá una con: "
+            "python -c 'from django.core.management.utils import "
+            "get_random_secret_key; print(get_random_secret_key())'"
+        )
+
+# Lista separada por comas, p. ej. "ejemplo.com,www.ejemplo.com".
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+if DEBUG:
+    # runserver necesita estos hosts en desarrollo. Además, config/urls.py
+    # sólo sirve static/ y media/ cuando DEBUG=True; en producción debe
+    # servirlos el servidor web (collectstatic).
+    ALLOWED_HOSTS += ["localhost", "127.0.0.1", "[::1]"]
 
 
 # Application definition
@@ -126,9 +180,9 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # Temporada mostrada por el hub. Los comandos de sincronización y el contexto
 # compartido usan este valor (con default en el código para no romper nada).
-F1_SEASON_YEAR = 2026
+F1_SEASON_YEAR = int(os.environ.get("F1_SEASON_YEAR", "2026"))
 
 # Configuración de la telemetría: validez de la caché y tamaño del selector de
 # sesiones en la vista. El código aplica defaults vía getattr().
-TELEMETRY_CACHE_TTL_DAYS = 7
-TELEMETRY_SESSION_LIMIT = 50
+TELEMETRY_CACHE_TTL_DAYS = int(os.environ.get("TELEMETRY_CACHE_TTL_DAYS", "7"))
+TELEMETRY_SESSION_LIMIT = int(os.environ.get("TELEMETRY_SESSION_LIMIT", "50"))

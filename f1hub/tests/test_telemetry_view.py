@@ -8,6 +8,10 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from f1hub.jobs import STATUS_PENDING, STATUS_READY
+from f1hub.models import TelemetryJob as JobRow
+from f1hub.services import build_cache_key
+
 from .helpers import make_driver, make_event, make_season, make_session
 
 PLOT_PATH = "telemetry/tel_prueba.png"
@@ -242,3 +246,36 @@ class TelemetryViewTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "unknown")
+
+    @patch("f1hub.jobs._launch_worker")
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value="")
+    def test_view_persists_job_in_database(self, cached, launch_worker):
+        response = self.client.get(
+            reverse("telemetry"), {"d1": "VER", "d2": "COL"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        key = build_cache_key(self.race, self.ver, self.col)
+        self.assertEqual(response.context["job_key"], key)
+        row = JobRow.objects.get(key=key)
+        self.assertEqual(row.status, STATUS_PENDING)
+        self.assertEqual(row.session_id, self.race.pk)
+        launch_worker.assert_called_once()
+
+    @patch("f1hub.views.get_cached_telemetry_plot", return_value="")
+    def test_job_status_endpoint_reads_persisted_job(self, cached):
+        key = build_cache_key(self.race, self.col, self.ver)
+        JobRow.objects.create(
+            key=key,
+            session=self.race,
+            driver1=self.col,
+            driver2=self.ver,
+            status=STATUS_READY,
+            plot_path=PLOT_PATH,
+        )
+
+        response = self.client.get(reverse("telemetry_job_status"), {"key": key})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ready")
+        self.assertTrue(response.json()["plot_url"].endswith(PLOT_PATH))

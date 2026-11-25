@@ -1,31 +1,40 @@
-"""Registro en memoria de trabajos de generación de telemetría.
+"""Estado persistente de los trabajos de generación de telemetría.
 
 La generación de un PNG con FastF1 tarda (descarga y cálculo), así que la vista
-lanza un hilo *daemon* y devuelve el control de inmediato. El estado se consulta
-por el endpoint ``telemetry_job_status`` con la clave del trabajo.
+lanza un hilo *daemon* y devuelve el control de inmediato. A diferencia de una
+implementación anterior basada en un ``dict`` en memoria, el estado vive en la
+tabla ``TelemetryJob``: el endpoint ``telemetry_job_status`` lo lee desde la BD,
+por lo que funciona con varios workers y tras reinicios del servidor.
 
-No hay dependencias externas (ni Celery ni Redis): el registro es por proceso,
-por lo que al reiniciar el servidor los trabajos se pierden. Es aceptable para
-una caché regenerable: la vista vuelve a lanzar la generación en la siguiente
-petición si no hay PNG válido en ``TelemetryCache``.
+Un trabajo huérfano (proceso muerto a mitad de generación) se detecta por su
+antigüedad: ``get_job`` lo marca como fallido y ``start_job`` lo reinicia. No se
+añaden dependencias (ni Celery ni Redis).
 """
 
 import logging
 import os
 import threading
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
+from datetime import timedelta
 
+from django.conf import settings
 from django.db import close_old_connections
+from django.db.utils import OperationalError
 from django.utils import timezone
 
+from .models import (
+    STATUS_ERROR,
+    STATUS_GENERATING,
+    STATUS_PENDING,
+    STATUS_READY,
+    Driver,
+    Session,
+    TelemetryJob as JobRow,
+)
 from .services import _plot_file_path, build_cache_key, get_or_generate_telemetry_plot
 
 logger = logging.getLogger(__name__)
-
-STATUS_PENDING = "pending"
-STATUS_GENERATING = "generating"
-STATUS_READY = "ready"
-STATUS_ERROR = "error"
 
 # Mensaje sin detalles técnicos: el traceback se guarda solo en los logs.
 TELEMETRY_USER_ERROR = (
@@ -33,100 +42,216 @@ TELEMETRY_USER_ERROR = (
     "o probá con otra sesión."
 )
 
-_lock = threading.Lock()
-_jobs = {}
+# Un trabajo "generando" más viejo que esto se considera huérfano. El valor es
+# generoso porque la primera descarga de FastF1 puede tardar varios minutos.
+DEFAULT_STALE_SECONDS = 1800.0
+
+# SQLite bloquea la tabla entera para escribir. Un hilo worker y el request
+# pueden querer actualizar la misma fila a la vez; serializamos las escrituras
+# dentro del proceso y reintentamos los bloqueos transitorios entre procesos.
+_write_lock = threading.Lock()
+_LOCK_RETRIES = 20
+_LOCK_DELAY = 0.05
+
+
+def _update_job(filters, **fields):
+    """Actualiza filas de trabajos con reintento ante bloqueos de SQLite."""
+    for attempt in range(_LOCK_RETRIES):
+        with _write_lock:
+            try:
+                return JobRow.objects.filter(**filters).update(**fields)
+            except OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == _LOCK_RETRIES - 1:
+                    raise
+        time.sleep(_LOCK_DELAY)
 
 
 @dataclass
 class TelemetryJob:
+    """Copia del estado con la misma API que el registro en memoria anterior."""
+
     key: str
     status: str = STATUS_PENDING
     plot_path: str = ""
     error: str = ""
-    started_at: object = field(default_factory=timezone.now)
+    started_at: object = None
+
+
+def _stale_seconds():
+    """Umbral de huérfanos, configurable sin tocar ``settings.py``."""
+    try:
+        return float(
+            getattr(settings, "TELEMETRY_JOB_STALE_SECONDS", DEFAULT_STALE_SECONDS)
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_STALE_SECONDS
+
+
+def _is_stale(row):
+    reference = row.updated_at or row.created_at
+    if reference is None:
+        return True
+    if timezone.is_naive(reference):
+        reference = timezone.make_aware(reference, timezone.get_default_timezone())
+    return timezone.now() - reference > timedelta(seconds=_stale_seconds())
+
+
+def _snapshot(row):
+    return TelemetryJob(
+        key=row.key,
+        status=row.status,
+        plot_path=row.plot_path or "",
+        error=row.error or "",
+        started_at=row.started_at,
+    )
+
+
+def _plot_exists(plot_path):
+    absolute = _plot_file_path(plot_path)
+    return bool(absolute and os.path.isfile(absolute))
 
 
 def clear_jobs():
-    """Vacía el registro (útil en tests y al cambiar la configuración)."""
-    with _lock:
-        _jobs.clear()
+    """Borra las filas de trabajos (útil en tests; no toca ``TelemetryCache``)."""
+    with _write_lock:
+        JobRow.objects.all().delete()
 
 
 def get_job(key):
-    """Devuelve una copia del estado, o ``None`` si la clave no existe."""
-    with _lock:
-        job = _jobs.get(key)
-        if job is None:
-            return None
-        return TelemetryJob(
-            key=job.key,
-            status=job.status,
-            plot_path=job.plot_path,
-            error=job.error,
-            started_at=job.started_at,
+    """Devuelve una copia del estado desde la BD, o ``None`` si no existe.
+
+    Un trabajo pendiente/generando huérfano (más viejo que el umbral) se marca
+    como fallido para que el sondeo no espere eternamente al worker muerto.
+    """
+    if not key:
+        return None
+    row = JobRow.objects.filter(key=key).first()
+    if row is None:
+        return None
+    if row.status in (STATUS_PENDING, STATUS_GENERATING) and _is_stale(row):
+        now = timezone.now()
+        changed = _update_job(
+            {"pk": row.pk, "status": row.status, "updated_at": row.updated_at},
+            status=STATUS_ERROR,
+            error=TELEMETRY_USER_ERROR,
+            finished_at=now,
+            updated_at=now,
         )
+        if changed:
+            row.status = STATUS_ERROR
+            row.error = TELEMETRY_USER_ERROR
+            row.finished_at = now
+    return _snapshot(row)
 
 
 def start_job(session, driver1, driver2):
-    """Registra y lanza la generación; reutiliza trabajos ya en curso.
+    """Obtiene o crea el trabajo persistente y lanza el worker si hace falta.
 
     La clave es la misma del servicio (temporada + sesión + pareja canónica),
-    por lo que ``VER vs COL`` y ``COL vs VER`` comparten un único trabajo.
+    por lo que ``VER vs COL`` y ``COL vs VER`` comparten una única fila. El
+    reinicio usa control optimista por ``updated_at``: si otro worker tocó la
+    fila mientras tanto, este proceso no lanza un segundo hilo.
     """
     key = build_cache_key(session, driver1, driver2)
+    with _write_lock:
+        row, created = JobRow.objects.get_or_create(
+            key=key,
+            defaults={
+                "session": session,
+                "driver1": driver1,
+                "driver2": driver2,
+                "status": STATUS_PENDING,
+            },
+        )
+    state = _snapshot(row)
 
-    with _lock:
-        existing = _jobs.get(key)
-        if existing and existing.status in (STATUS_PENDING, STATUS_GENERATING):
+    # Una fila recién creada siempre debe lanzar el worker: todavía no hay
+    # nadie generando, aunque ya tenga el estado "pending" por defecto.
+    reusable = not created and (
+        (state.status in (STATUS_PENDING, STATUS_GENERATING) and not _is_stale(row))
+        or (state.status == STATUS_READY and _plot_exists(state.plot_path))
+    )
+    if reusable:
+        return state
+
+    claimed = _update_job(
+        {"pk": row.pk, "status": state.status, "updated_at": row.updated_at},
+        status=STATUS_PENDING,
+        plot_path="",
+        error="",
+        started_at=None,
+        finished_at=None,
+        updated_at=timezone.now(),
+    )
+    if not claimed:
+        # Otro worker ganó la carrera: devolvemos su estado actual.
+        current = JobRow.objects.filter(pk=row.pk).first()
+        if current is None:
             return TelemetryJob(
-                key=existing.key, status=existing.status,
-                plot_path=existing.plot_path, error=existing.error,
-                started_at=existing.started_at,
+                key=key, status=STATUS_ERROR, error=TELEMETRY_USER_ERROR
             )
-        if existing and existing.status == STATUS_READY:
-            absolute = _plot_file_path(existing.plot_path)
-            if absolute and os.path.isfile(absolute):
-                return TelemetryJob(
-                    key=existing.key, status=existing.status,
-                    plot_path=existing.plot_path, error=existing.error,
-                    started_at=existing.started_at,
-                )
-            _jobs.pop(key, None)  # el PNG desapareció: se regenera.
+        return _snapshot(current)
 
-        job = TelemetryJob(key=key, status=STATUS_PENDING)
-        _jobs[key] = job
+    _launch_worker(
+        row.pk,
+        session.pk,
+        driver1.pk,
+        driver2.pk,
+        f"{key} ({driver1.acronym} vs {driver2.acronym}, sesión {session.pk})",
+    )
+    return TelemetryJob(key=key, status=STATUS_PENDING)
 
+
+def _launch_worker(job_pk, session_pk, driver1_pk, driver2_pk, label):
+    """Arranca el hilo daemon que actualizará la fila en la BD."""
     thread = threading.Thread(
         target=_run_job,
-        args=(job, session, driver1, driver2),
-        name=f"telemetry-{key}",
+        args=(job_pk, session_pk, driver1_pk, driver2_pk, label),
+        name=f"telemetry-{job_pk}",
         daemon=True,
     )
     thread.start()
-    return TelemetryJob(key=job.key, status=job.status, started_at=job.started_at)
+    return thread
 
 
-def _run_job(job, session, driver1, driver2):
-    """Cuerpo del hilo: nunca lanza excepciones hacia el request."""
+def _run_job(job_pk, session_pk, driver1_pk, driver2_pk, label):
+    """Cuerpo del hilo: trabaja con PKs y nunca lanza al request."""
     close_old_connections()
+    started = timezone.now()
+    _update_job(
+        {"pk": job_pk},
+        status=STATUS_GENERATING,
+        started_at=started,
+        finished_at=None,
+        error="",
+        updated_at=started,
+    )
     try:
-        with _lock:
-            job.status = STATUS_GENERATING
+        session = Session.objects.get(pk=session_pk)
+        driver1 = Driver.objects.get(pk=driver1_pk)
+        driver2 = Driver.objects.get(pk=driver2_pk)
         plot_path = get_or_generate_telemetry_plot(session, driver1, driver2)
         if not plot_path:
             raise RuntimeError("El servicio no devolvió una ruta de gráfico.")
     except Exception:
-        logger.exception(
-            "Falló el trabajo de telemetría %s (%s vs %s, sesión %s)",
-            job.key, driver1.acronym, driver2.acronym, session.pk,
+        logger.exception("Falló el trabajo de telemetría %s", label)
+        finished = timezone.now()
+        _update_job(
+            {"pk": job_pk},
+            status=STATUS_ERROR,
+            error=TELEMETRY_USER_ERROR,
+            finished_at=finished,
+            updated_at=finished,
         )
-        with _lock:
-            job.status = STATUS_ERROR
-            job.error = TELEMETRY_USER_ERROR
     else:
-        with _lock:
-            job.status = STATUS_READY
-            job.plot_path = plot_path
-            job.error = ""
+        finished = timezone.now()
+        _update_job(
+            {"pk": job_pk},
+            status=STATUS_READY,
+            plot_path=plot_path,
+            error="",
+            finished_at=finished,
+            updated_at=finished,
+        )
     finally:
         close_old_connections()

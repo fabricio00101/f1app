@@ -1,5 +1,19 @@
 from django.db import models
 
+# Estados compartidos por el modelo de trabajos, f1hub.jobs y la plantilla de
+# telemetría (los valores son los que consume el sondeo JSON).
+STATUS_PENDING = "pending"
+STATUS_GENERATING = "generating"
+STATUS_READY = "ready"
+STATUS_ERROR = "error"
+TELEMETRY_JOB_STATUS_CHOICES = [
+    (STATUS_PENDING, "Pendiente"),
+    (STATUS_GENERATING, "Generando"),
+    (STATUS_READY, "Listo"),
+    (STATUS_ERROR, "Error"),
+]
+
+
 class Season(models.Model):
     year = models.IntegerField(unique=True)
     regulations = models.TextField(help_text="Technical regulations description")
@@ -79,3 +93,40 @@ class TelemetryCache(models.Model):
 
     def __str__(self):
         return f"Telemetry: {self.driver1.acronym} vs {self.driver2.acronym} - {self.session}"
+
+
+class TelemetryJob(models.Model):
+    """Estado persistente de la generación asíncrona de un gráfico.
+
+    A diferencia del registro en memoria anterior, la fila vive en la BD: el
+    endpoint de sondeo la lee desde cualquier worker y el trabajo sobrevive a
+    reinicios del servidor. La clave es la canónica del servicio (temporada +
+    sesión + pareja ordenada), así que ``VER vs COL`` y ``COL vs VER``
+    comparten una única fila.
+    """
+
+    key = models.CharField(max_length=200, unique=True)
+    session = models.ForeignKey(
+        Session, on_delete=models.CASCADE, related_name="telemetry_jobs"
+    )
+    driver1 = models.ForeignKey(
+        Driver, on_delete=models.CASCADE, related_name="telemetry_jobs_driver1"
+    )
+    driver2 = models.ForeignKey(
+        Driver, on_delete=models.CASCADE, related_name="telemetry_jobs_driver2"
+    )
+    status = models.CharField(
+        max_length=20, choices=TELEMETRY_JOB_STATUS_CHOICES, default=STATUS_PENDING
+    )
+    plot_path = models.CharField(max_length=500, blank=True, default="")
+    error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"TelemetryJob {self.key} ({self.status})"
