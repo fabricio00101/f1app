@@ -45,3 +45,8 @@ scipy==1.18.1
 # websockets: fastf1 3.9.2 exige >=10.3 (sin limite superior); se mantiene
 # 13.1 por ser la version probada con wheels cp312/cp313.
 websockets==13.1
+
+# Despliegue: servidor WSGI (Procfile/Dockerfile) y servicio de estaticos.
+# WhiteNoise sirve collectstatic desde la propia app, sin nginx dedicado.
+gunicorn==27.0.1
+whitenoise==6.12.0

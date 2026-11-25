@@ -96,6 +96,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise sirve los estáticos de STATIC_ROOT (collectstatic) también con
+    # DEBUG=False. Debe ir después de SecurityMiddleware y antes del resto.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -172,6 +175,18 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Los estáticos se comprimen y se sirven con hash (cache busting) mediante
+# WhiteNoise. Con DEBUG=True Django devuelve las URLs sin hash, así que el
+# desarrollo local (runserver) sigue comportándose igual.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 # Media files
 MEDIA_URL = 'media/'

@@ -26,49 +26,29 @@ Este proyecto utiliza la biblioteca **FastF1** para extraer datos, horarios, tel
   - `static/f1hub/`: Archivos CSS (`style.css`), tipografías e imágenes estáticas del Frontend.
   - `urls.py` & `views.py`: Enrutamiento y renderizado de las vistas `dashboard`, `drivers`, `teams` y `insights`.
 
-## Requisitos de Instalación
+## Arranque local
 
-Asegúrate de tener instalado Python 3.10+ y crear un entorno virtual, ya que el procesamiento de datos científicos de pandas y numpy que requiere FastF1 es estricto con sus dependencias.
+Python 3.10+ y entorno virtual (pandas/numpy de FastF1 son sensibles a las versiones). Clonar, activar `.venv`, instalar y arrancar — sin crear `.env` ni exportar variables:
 
 ```bash
-# 1. Clonar el repositorio
 git clone https://github.com/fabricio00101/f1app.git
 cd f1app
 
-# 2. Crear y activar el entorno virtual
-python -m venv .venv
-# En Windows:
-.\.venv\Scripts\activate
-# En Linux/Mac:
-source .venv/bin/activate
-
-# 3. Instalar las dependencias
-pip install django fastf1 matplotlib pandas
-```
-
-## Configuración
-
-La configuración sensible se lee de variables de entorno o de un archivo `.env` local. **Nunca subas el `.env`**: sólo `.env.example` está versionado.
-
-```bash
-# 1. Copiar la plantilla
-copy .env.example .env          # Windows
-cp .env.example .env            # Linux/Mac
-
-# 2. Generar un secret y pegarlo en DJANGO_SECRET_KEY de .env
-.\.venv\Scripts\python.exe -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-# Linux/Mac: .venv/bin/python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
-
-# 3. Activar el entorno virtual
+python -m venv .venv            # sólo si aún no existe
 .\.venv\Scripts\activate        # Windows
 source .venv/bin/activate       # Linux/Mac
 
-# 4. Verificar
-python manage.py check
-python manage.py test
+pip install -r requirements.txt
+python manage.py runserver
 ```
 
-Para desarrollo local, poné `DJANGO_DEBUG=1` en `.env`: así no hace falta un secret permanente (se genera uno temporal y las sesiones se invalidan al reiniciar) ni configurar `DJANGO_ALLOWED_HOSTS` (se agregan `localhost`, `127.0.0.1` y `[::1]`). **`DJANGO_DEBUG=1` es sólo para desarrollo**: en producción debe quedar en `0`, con un `DJANGO_SECRET_KEY` real y `DJANGO_ALLOWED_HOSTS` con los dominios correspondientes. Sin secret y con `DEBUG=False`, el arranque falla con un error explícito en lugar de usar una clave insegura.
+La primera vez que se ejecuta `manage.py`, si no hay `DJANGO_SECRET_KEY` ni `DJANGO_DEBUG` en el entorno y todavía no existe `.env`, se genera automáticamente un `.env` en la raíz con `DJANGO_DEBUG=1` y un `DJANGO_SECRET_KEY` aleatorio (se avisa en una línea por consola). Con eso funcionan `check`, `test`, `migrate`, `runserver` y los comandos de sincronización sin pasos previos. Ese `.env` es **sólo de desarrollo** y está en `.gitignore`: **nunca subirlo**. Si ya exportaste alguna de esas variables o ya existe `.env`, el bootstrap no sobrescribe nada.
+
+Entrá a `http://127.0.0.1:8000` para ver el Hub.
+
+## Configuración y producción
+
+La configuración sensible se lee de variables de entorno o de un `.env` local (las variables reales del proceso tienen prioridad). `.env.example` documenta las claves disponibles. En producción **no se autogenera nada**: definí explícitamente `DJANGO_DEBUG=0`, un `DJANGO_SECRET_KEY` real —por ejemplo con `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`— y `DJANGO_ALLOWED_HOSTS` con los dominios correspondientes. Con `DEBUG=False` y sin secret, el arranque falla con un error explícito en lugar de usar una clave insegura. Ver [DEPLOY.md](DEPLOY.md) para el despliegue.
 
 `config/urls.py` sirve `static/` y `media/` únicamente cuando `DEBUG=True`. En producción esos archivos debe servirlos el servidor web (`python manage.py collectstatic` para los estáticos).
 
@@ -88,10 +68,4 @@ python manage.py sync_schedule
 python manage.py sync_drivers
 ```
 
-Finalmente, levanta el servidor de desarrollo:
-
-```bash
-python manage.py runserver
-```
-
-Entra a `http://127.0.0.1:8000` en tu navegador para ver el Hub en acción.
+Con los datos cargados, recargá `http://127.0.0.1:8000` para ver el Hub con el calendario y la grilla de pilotos.
